@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gift Tracker — Codex Admin Home</title>
+<style>
+  :root {
+    --bg: #f4f6f3;
+    --card: #ffffff;
+    --ink: #18211d;
+    --muted: #66706b;
+    --line: #d8dfda;
+    --green: #31584b;
+    --green-soft: #e6efe9;
+    --amber: #99641d;
+    --amber-soft: #fff3df;
+    --red: #a24b42;
+    --red-soft: #fbe9e6;
+    --radius: 16px;
+    --shadow: 0 4px 18px rgba(20, 29, 25, 0.07);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    max-width: 430px;
+    margin: 0 auto;
+    min-height: 100vh;
+    background: linear-gradient(180deg, #eef2ee 0%, var(--bg) 100%);
+    color: var(--ink);
+    font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  }
+
+  .banner {
+    background: #f7e2b7;
+    color: #6f4d10;
+    text-align: center;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(244, 246, 243, 0.96);
+    backdrop-filter: blur(8px);
+    padding: 18px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .eyebrow {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+    font-weight: 800;
+  }
+
+  .title {
+    margin-top: 6px;
+    font-size: 28px;
+    font-weight: 800;
+  }
+
+  .subtitle {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1.45;
+  }
+
+  .screen {
+    padding: 18px 18px 92px;
+  }
+
+  .section {
+    margin: 18px 0 10px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+    font-weight: 800;
+  }
+
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+
+  .hero {
+    background: linear-gradient(135deg, #f7faf8 0%, #ffffff 100%);
+  }
+
+  .hero-title {
+    font-size: 23px;
+    font-weight: 800;
+    line-height: 1.15;
+  }
+
+  .hero-copy {
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1.45;
+  }
+
+  .btn {
+    width: 100%;
+    min-height: 52px;
+    border-radius: 14px;
+    font-size: 17px;
+    font-weight: 700;
+    border: none;
+    margin-top: 12px;
+  }
+
+  .btn.primary { background: var(--green); color: white; }
+  .btn.secondary { background: white; color: var(--green); border: 2px solid var(--green); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .metric {
+    background: #f8faf8;
+    border: 1px solid #dfe8e2;
+    border-radius: 14px;
+    padding: 14px;
+  }
+
+  .metric strong {
+    display: block;
+    font-size: 28px;
+    color: var(--green);
+    line-height: 1;
+  }
+
+  .metric span {
+    display: block;
+    margin-top: 6px;
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 700;
+  }
+
+  .row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid #edf1ee;
+  }
+
+  .row:last-child { border-bottom: none; }
+
+  .dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    margin-top: 5px;
+    flex-shrink: 0;
+  }
+
+  .dot.green { background: var(--green); }
+  .dot.amber { background: var(--amber); }
+  .dot.red { background: var(--red); }
+
+  .row-title {
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+
+  .row-copy {
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .tag {
+    margin-left: auto;
+    padding: 7px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .tag.ok { background: var(--green-soft); color: var(--green); }
+  .tag.warn { background: var(--amber-soft); color: var(--amber); }
+  .tag.alert { background: var(--red-soft); color: var(--red); }
+
+  .nav {
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    max-width: 430px;
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px 14px;
+    background: rgba(255,255,255,0.96);
+    border-top: 1px solid var(--line);
+  }
+
+  .nav button {
+    flex: 1;
+    min-height: 52px;
+    border-radius: 14px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 800;
+  }
+
+  .nav button.active {
+    background: var(--green-soft);
+    border-color: #cfddd5;
+    color: var(--green);
+  }
+</style>
+</head>
+<body>
+<div class="banner">UI MOCKUP — Codex Admin Redesign</div>
+
+<header class="header">
+  <div class="eyebrow">Admin</div>
+  <div class="title">Control Center</div>
+  <div class="subtitle">See what needs intervention, what the manager saw recently, and whether the system itself is healthy.</div>
+</header>
+
+<main class="screen">
+  <div class="panel hero">
+    <div class="hero-title">One thing needs admin attention.</div>
+    <div class="hero-copy">Taylor Nguyen was created from an import but still has no relationship or occasion assigned. Clean this up before the next reminder cycle.</div>
+    <button class="btn primary">Review New Person</button>
+  </div>
+
+  <div class="section">System Snapshot</div>
+  <div class="panel">
+    <div class="grid">
+      <div class="metric"><strong>3</strong><span>Upcoming events needing gifts</span></div>
+      <div class="metric"><strong>1</strong><span>Records needing cleanup</span></div>
+      <div class="metric"><strong>0</strong><span>Failed jobs</span></div>
+      <div class="metric"><strong>2:58 AM</strong><span>Last backup finished</span></div>
+    </div>
+  </div>
+
+  <div class="section">Needs Review</div>
+  <div class="panel">
+    <div class="row">
+      <div class="dot amber"></div>
+      <div>
+        <div class="row-title">Taylor Nguyen has no event assigned</div>
+        <div class="row-copy">Created during import review. One gift was attached, but no relationship or upcoming occasion is set.</div>
+      </div>
+      <div class="tag warn">Review</div>
+    </div>
+    <div class="row">
+      <div class="dot amber"></div>
+      <div>
+        <div class="row-title">Dad has a draft gift that was never finished</div>
+        <div class="row-copy">The manager started a gift entry yesterday and stopped after the title field.</div>
+      </div>
+      <div class="tag warn">Check</div>
+    </div>
+  </div>
+
+  <div class="section">Manager Context</div>
+  <div class="panel">
+    <div class="row">
+      <div class="dot green"></div>
+      <div>
+        <div class="row-title">Last opened Today screen at 8:42 AM</div>
+        <div class="row-copy">Most recently viewed Marcus, then opened Add Gift for Dad.</div>
+      </div>
+      <div class="tag ok">Active</div>
+    </div>
+    <div class="row">
+      <div class="dot green"></div>
+      <div>
+        <div class="row-title">No unusual status changes detected</div>
+        <div class="row-copy">No backward moves, duplicates, or rapid repeat edits in the last 7 days.</div>
+      </div>
+      <div class="tag ok">Normal</div>
+    </div>
+  </div>
+
+  <div class="section">Operations</div>
+  <div class="panel">
+    <div class="row">
+      <div class="dot green"></div>
+      <div>
+        <div class="row-title">Backups are healthy</div>
+        <div class="row-copy">SQLite backup uploaded to DigitalOcean Spaces and local verification succeeded.</div>
+      </div>
+      <div class="tag ok">Healthy</div>
+    </div>
+    <div class="row">
+      <div class="dot green"></div>
+      <div>
+        <div class="row-title">Reminder job ran successfully</div>
+        <div class="row-copy">Daily reminder digest was sent by email and Telegram at 7:00 AM.</div>
+      </div>
+      <div class="tag ok">Healthy</div>
+    </div>
+    <div class="row">
+      <div class="dot red"></div>
+      <div>
+        <div class="row-title">Imports remain a secondary tool</div>
+        <div class="row-copy">No import is required for daily use. Manual entry continues to be the primary truth source.</div>
+      </div>
+      <div class="tag alert">Intentional</div>
+    </div>
+  </div>
+
+  <div class="section">Quick Actions</div>
+  <div class="panel">
+    <button class="btn primary">Open People Manager</button>
+    <button class="btn secondary">Review Import Exceptions</button>
+    <button class="btn secondary">Open Backup Status</button>
+  </div>
+</main>
+
+<nav class="nav">
+  <button class="active">Today</button>
+  <button>People</button>
+  <button>Imports</button>
+  <button>Settings</button>
+</nav>
+</body>
+</html>

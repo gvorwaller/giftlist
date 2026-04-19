@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gift Tracker — Codex Notification Settings</title>
+<style>
+  :root {
+    --bg: #f5f6f4;
+    --card: #fff;
+    --ink: #1a221e;
+    --muted: #68716c;
+    --line: #d9dfdb;
+    --green: #30594b;
+    --green-soft: #e7efe9;
+    --radius: 16px;
+    --shadow: 0 4px 18px rgba(20, 29, 25, 0.07);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    max-width: 430px;
+    margin: 0 auto;
+    min-height: 100vh;
+    background: linear-gradient(180deg, #eef2ee 0%, var(--bg) 100%);
+    font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+  }
+  .banner {
+    background: #f7e2b7;
+    color: #6f4d10;
+    text-align: center;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .header {
+    padding: 18px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(245, 246, 244, 0.96);
+    position: sticky;
+    top: 0;
+  }
+  .eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 800; }
+  .title { margin-top: 6px; font-size: 28px; font-weight: 800; }
+  .subtitle { margin-top: 6px; color: var(--muted); font-size: 15px; line-height: 1.45; }
+  .screen { padding: 18px; }
+  .section { margin: 18px 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 800; }
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+  label { display: block; margin-bottom: 6px; font-size: 14px; font-weight: 700; }
+  input, select {
+    width: 100%;
+    min-height: 48px;
+    border: 2px solid #d7ded8;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 16px;
+    background: white;
+  }
+  .toggle-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid #edf1ee;
+    align-items: center;
+  }
+  .toggle-row:last-child { border-bottom: none; }
+  .toggle-title { font-size: 17px; font-weight: 700; }
+  .toggle-copy { margin-top: 2px; color: var(--muted); font-size: 14px; line-height: 1.35; }
+  .toggle {
+    width: 54px;
+    height: 32px;
+    border-radius: 999px;
+    background: var(--green);
+    position: relative;
+    flex-shrink: 0;
+  }
+  .toggle::after {
+    content: "";
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: white;
+    position: absolute;
+    top: 4px;
+    right: 4px;
+  }
+  .preview {
+    margin-top: 12px;
+    background: var(--green-soft);
+    border: 1px solid #cfe0d7;
+    border-radius: 14px;
+    padding: 14px;
+    color: var(--green);
+    font-size: 15px;
+    line-height: 1.45;
+  }
+  .btn {
+    width: 100%;
+    min-height: 52px;
+    border-radius: 14px;
+    font-size: 17px;
+    font-weight: 700;
+    border: none;
+    margin-top: 12px;
+    background: var(--green);
+    color: white;
+  }
+</style>
+</head>
+<body>
+<div class="banner">UI MOCKUP — Codex Admin Redesign</div>
+
+<header class="header">
+  <div class="eyebrow">Admin</div>
+  <div class="title">Notifications</div>
+  <div class="subtitle">Keep v1 settings compact. Configure the outputs, not a large rules engine.</div>
+</header>
+
+<main class="screen">
+  <div class="section">Delivery</div>
+  <div class="panel">
+    <div class="field">
+      <label>Email summary goes to</label>
+      <input type="email" value="gaylon@vorwaller.net">
+    </div>
+    <div class="field">
+      <label>Telegram delivery</label>
+      <select>
+        <option selected>Enabled via existing bot</option>
+        <option>Disabled</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="section">What to Send</div>
+  <div class="panel">
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-title">Daily reminders</div>
+        <div class="toggle-copy">Upcoming occasions with no handled gift yet.</div>
+      </div>
+      <div class="toggle"></div>
+    </div>
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-title">Package updates</div>
+        <div class="toggle-copy">Shipment and arrival notices.</div>
+      </div>
+      <div class="toggle"></div>
+    </div>
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-title">Weekly summary</div>
+        <div class="toggle-copy">One calm roll-up each week.</div>
+      </div>
+      <div class="toggle"></div>
+    </div>
+  </div>
+
+  <div class="section">Timing</div>
+  <div class="panel">
+    <div class="field">
+      <label>Start reminding this many days before an event</label>
+      <select>
+        <option>14 days</option>
+        <option selected>21 days</option>
+        <option>30 days</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Weekly summary day</label>
+      <select>
+        <option>Friday</option>
+        <option>Saturday</option>
+        <option selected>Sunday</option>
+      </select>
+    </div>
+    <div class="preview">
+      Marcus's birthday is in 18 days. No gift is marked bought yet.
+      <br><br>
+      AirPods Max for Sarah is expected to arrive April 5.
+    </div>
+  </div>
+
+  <button class="btn">Save Settings</button>
+</main>
+</body>
+</html>

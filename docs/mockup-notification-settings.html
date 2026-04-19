@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gift Tracker — Notification Settings</title>
+<style>
+  :root {
+    --primary: #2E6B4F; --primary-light: #E8F5EE; --accent: #D4763A; --danger: #C0392B;
+    --text: #1A1A1A; --text-muted: #4A4A4A; --bg: #FAFAF8; --card: #FFFFFF; --border: #D6D6D6; --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; font-size: 18px; line-height: 1.5; color: var(--text); background: var(--bg); max-width: 430px; margin: 0 auto; min-height: 100vh; }
+  .mockup-banner { background: #FFF3CD; border-bottom: 1px solid #FFECB5; padding: 8px 16px; text-align: center; font-size: 13px; color: #856404; font-weight: 600; }
+  .app-header { background: var(--primary); color: white; padding: 16px 20px 14px; position: sticky; top: 0; z-index: 100; }
+  .app-header .date-line { font-size: 14px; opacity: 0.85; margin-bottom: 2px; }
+  .app-header .page-title { font-size: 22px; font-weight: 700; }
+  .back-btn { background: rgba(255,255,255,0.18); color: white; border: none; border-radius: 8px; padding: 8px 14px; font-size: 15px; font-weight: 600; cursor: pointer; min-height: 44px; margin-top: 10px; display: inline-flex; align-items: center; gap: 6px; }
+
+  .screen { padding: 16px 16px 100px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .card-title { font-size: 17px; font-weight: 700; color: var(--primary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .card-title .icon { font-size: 20px; }
+  .section-label { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin: 20px 0 8px; }
+
+  .action-btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 16px; border: none; border-radius: var(--radius); font-size: 18px; font-weight: 600; cursor: pointer; min-height: 56px; margin-bottom: 10px; }
+  .action-btn.primary { background: var(--primary); color: white; }
+  .action-btn.secondary { background: white; color: var(--primary); border: 2px solid var(--primary); }
+  .action-btn:active { transform: scale(0.98); }
+
+  .toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid #F0F0F0; }
+  .toggle-row:last-child { border-bottom: none; }
+  .toggle-info { flex: 1; padding-right: 12px; }
+  .toggle-label { font-size: 17px; font-weight: 600; }
+  .toggle-hint { font-size: 14px; color: var(--text-muted); margin-top: 2px; }
+
+  .toggle { width: 52px; height: 30px; border-radius: 15px; border: none; cursor: pointer; position: relative; flex-shrink: 0; min-width: 52px; }
+  .toggle.on { background: var(--primary); }
+  .toggle.off { background: #CCC; }
+  .toggle::after { content: ''; position: absolute; width: 24px; height: 24px; border-radius: 50%; background: white; top: 3px; transition: left 0.2s; }
+  .toggle.on::after { left: 25px; }
+  .toggle.off::after { left: 3px; }
+
+  .form-field { margin-bottom: 16px; }
+  .form-field label { font-size: 15px; font-weight: 600; display: block; margin-bottom: 6px; }
+  .form-field input, .form-field select {
+    width: 100%; padding: 14px; font-size: 17px; border: 2px solid var(--border); border-radius: 10px; min-height: 48px; background: white;
+  }
+
+  .channel-card {
+    display: flex; align-items: center; gap: 14px; padding: 16px;
+    background: white; border: 2px solid var(--border); border-radius: var(--radius);
+    margin-bottom: 10px; cursor: pointer;
+  }
+  .channel-card.active { border-color: var(--primary); background: var(--primary-light); }
+  .channel-icon { font-size: 28px; flex-shrink: 0; }
+  .channel-name { font-size: 17px; font-weight: 600; }
+  .channel-status { font-size: 14px; margin-top: 2px; }
+  .channel-status.connected { color: var(--primary); }
+  .channel-status.disconnected { color: var(--danger); }
+  .channel-check { margin-left: auto; font-size: 22px; color: var(--primary); }
+
+  .preview-box {
+    background: #F8F8F6; border-radius: 10px; padding: 16px; margin: 14px 0;
+    border-left: 4px solid var(--primary);
+  }
+  .preview-label { font-size: 13px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+  .preview-msg { font-size: 16px; line-height: 1.5; }
+
+  .tier-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; margin-bottom: 8px; cursor: pointer; min-height: 48px; }
+  .tier-row.selected { background: var(--primary-light); border: 2px solid var(--primary); }
+  .tier-row:not(.selected) { background: #F8F8F6; border: 2px solid transparent; }
+  .tier-radio { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border); flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .tier-row.selected .tier-radio { border-color: var(--primary); }
+  .tier-row.selected .tier-radio::after { content: ''; width: 12px; height: 12px; border-radius: 50%; background: var(--primary); }
+  .tier-days { font-size: 16px; font-weight: 600; }
+  .tier-msg { font-size: 13px; color: var(--text-muted); }
+
+  .test-result { padding: 14px; border-radius: 10px; margin-top: 12px; font-size: 16px; font-weight: 600; display: none; text-align: center; }
+  .test-result.success { display: block; background: var(--primary-light); color: var(--primary); }
+
+  .dialog-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 200; align-items: center; justify-content: center; padding: 20px; }
+  .dialog-overlay.show { display: flex; }
+  .dialog-box { background: white; border-radius: 16px; padding: 28px 24px; max-width: 360px; width: 100%; text-align: center; }
+  .dialog-text { font-size: 19px; margin-bottom: 20px; line-height: 1.4; }
+  .dialog-btns { display: flex; gap: 10px; }
+  .dialog-btns button { flex: 1; padding: 14px; border-radius: 10px; font-size: 17px; font-weight: 600; cursor: pointer; border: none; min-height: 52px; }
+  .dialog-yes { background: var(--primary); color: white; }
+  .dialog-no { background: #F0F0F0; color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="mockup-banner">UI MOCKUP — Notification Settings</div>
+
+<header class="app-header">
+  <div class="date-line" id="todayDate"></div>
+  <div class="page-title">Notification Settings</div>
+  <button class="back-btn">← Back to Admin</button>
+</header>
+
+<div class="screen">
+
+  <!-- Notification Channels -->
+  <div class="section-label">Notification Channels</div>
+
+  <div class="channel-card active" onclick="this.classList.toggle('active')">
+    <div class="channel-icon">📧</div>
+    <div>
+      <div class="channel-name">Email</div>
+      <div class="channel-status connected">Connected — gaylon@vorwaller.net</div>
+    </div>
+    <div class="channel-check">✓</div>
+  </div>
+
+  <div class="channel-card active" onclick="this.classList.toggle('active')">
+    <div class="channel-icon">✈️</div>
+    <div>
+      <div class="channel-name">Telegram</div>
+      <div class="channel-status connected">Connected — via GdawgTradeBot</div>
+    </div>
+    <div class="channel-check">✓</div>
+  </div>
+
+  <!-- Email Settings -->
+  <div class="section-label">Email Settings</div>
+  <div class="card">
+    <div class="form-field">
+      <label>Send reminders to</label>
+      <input type="email" value="gaylon@vorwaller.net">
+    </div>
+    <div class="form-field">
+      <label>Email provider</label>
+      <select>
+        <option selected>Resend (free tier — 100/day)</option>
+        <option>Mailgun</option>
+        <option>Direct SMTP</option>
+      </select>
+    </div>
+
+    <button class="action-btn secondary" onclick="document.getElementById('email-test').className='test-result success'">Send Test Email</button>
+    <div class="test-result" id="email-test">✓ Test email sent to gaylon@vorwaller.net</div>
+  </div>
+
+  <!-- Telegram Settings -->
+  <div class="section-label">Telegram Settings</div>
+  <div class="card">
+    <div class="form-field">
+      <label>Bot</label>
+      <select>
+        <option selected>GdawgTradeBot (existing)</option>
+        <option>Create dedicated Gift Tracker bot</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label>Chat ID</label>
+      <input type="text" value="7641563703" style="font-family: monospace;">
+    </div>
+
+    <button class="action-btn secondary" onclick="document.getElementById('tg-test').className='test-result success'">Send Test Message</button>
+    <div class="test-result" id="tg-test">✓ Test message sent via Telegram</div>
+  </div>
+
+  <!-- What to Notify -->
+  <div class="section-label">What to Notify About</div>
+  <div class="card">
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-label">Upcoming Occasion Reminders</div>
+        <div class="toggle-hint">Get reminded when someone has an occasion coming up and no gift is ordered yet</div>
+      </div>
+      <button class="toggle on" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-label">Shipment Updates</div>
+        <div class="toggle-hint">Get notified when a gift ships or is delivered</div>
+      </div>
+      <button class="toggle on" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-label">Inactivity Alert</div>
+        <div class="toggle-hint">Notify admin if the gift manager hasn't opened the app and there are upcoming occasions</div>
+      </div>
+      <button class="toggle on" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-label">Import Summaries</div>
+        <div class="toggle-hint">Send a summary after each CSV import completes</div>
+      </div>
+      <button class="toggle off" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+    </div>
+  </div>
+
+  <!-- Reminder Timing -->
+  <div class="section-label">Reminder Timing</div>
+  <div class="card">
+    <div style="font-size:16px; color:var(--text-muted); margin-bottom:14px;">How urgently should reminders escalate as an occasion approaches?</div>
+
+    <div class="tier-row selected" onclick="selectTier(this)">
+      <div class="tier-radio"></div>
+      <div>
+        <div class="tier-days">21+ days out</div>
+        <div class="tier-msg">"Heads up: Marcus's birthday is in 25 days"</div>
+      </div>
+    </div>
+    <div class="tier-row" onclick="selectTier(this)">
+      <div class="tier-radio"></div>
+      <div>
+        <div class="tier-days">7–13 days out</div>
+        <div class="tier-msg">"Reminder: Marcus's birthday is next week — no gift ordered yet"</div>
+      </div>
+    </div>
+    <div class="tier-row" onclick="selectTier(this)">
+      <div class="tier-radio"></div>
+      <div>
+        <div class="tier-days">Under 7 days</div>
+        <div class="tier-msg">"Still time to get something for Marcus's birthday!"</div>
+      </div>
+    </div>
+
+    <div class="form-field" style="margin-top:16px;">
+      <label>Default lead time (days before occasion)</label>
+      <select>
+        <option>14 days</option>
+        <option selected>21 days</option>
+        <option>30 days</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Weekly Digest -->
+  <div class="section-label">Weekly Digest</div>
+  <div class="card">
+    <div class="toggle-row" style="border:none; padding-bottom:0;">
+      <div class="toggle-info">
+        <div class="toggle-label">Send Weekly Summary</div>
+        <div class="toggle-hint">Upcoming occasions, active shipments, and recently delivered items</div>
+      </div>
+      <button class="toggle on" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:16px;">
+      <div class="form-field" style="flex:1;">
+        <label>Day</label>
+        <select>
+          <option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option>
+          <option>Friday</option><option>Saturday</option><option selected>Sunday</option>
+        </select>
+      </div>
+      <div class="form-field" style="flex:1;">
+        <label>Time</label>
+        <select>
+          <option>9:00 AM</option><option>12:00 PM</option><option>3:00 PM</option><option selected>6:00 PM</option><option>9:00 PM</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="preview-box">
+      <div class="preview-label">Preview — Weekly Digest</div>
+      <div class="preview-msg">
+        <strong>This week in Gift Tracker:</strong><br><br>
+        🎂 Marcus's birthday is April 20 (19 days). 3 ideas saved, nothing ordered yet.<br><br>
+        📦 AirPods Max for Sarah — arriving April 5 via UPS.<br><br>
+        ✅ Cookbook for Dad — ordered March 30, processing.<br><br>
+        <em style="color:var(--text-muted);">Sent every Sunday at 6:00 PM</em>
+      </div>
+    </div>
+  </div>
+
+  <!-- Occasion Templates -->
+  <div class="section-label">Occasion Templates</div>
+  <div class="card">
+    <div class="card-title"><span class="icon">📅</span> Pre-loaded Occasions</div>
+    <div style="font-size:15px; color:var(--text-muted); margin-bottom:12px;">Standard US holidays are pre-populated. Toggle on to make them available when assigning occasions to people.</div>
+
+    <div class="toggle-row">
+      <div class="toggle-info"><div class="toggle-label">Christmas — Dec 25</div></div>
+      <button class="toggle on" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info"><div class="toggle-label">Valentine's Day — Feb 14</div></div>
+      <button class="toggle on" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info"><div class="toggle-label">Mother's Day — May 10</div></div>
+      <button class="toggle on" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info"><div class="toggle-label">Father's Day — Jun 15</div></div>
+      <button class="toggle on" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info"><div class="toggle-label">Easter — Apr 5</div></div>
+      <button class="toggle off" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info"><div class="toggle-label">Thanksgiving — Nov 27</div></div>
+      <button class="toggle off" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+    </div>
+
+    <button class="action-btn secondary" style="margin-top:14px;">+ Add Custom Occasion</button>
+  </div>
+
+  <button class="action-btn primary" onclick="showDialog('Save all notification settings?')">Save Settings</button>
+</div>
+
+<div class="dialog-overlay" id="confirmDialog">
+  <div class="dialog-box">
+    <div class="dialog-text" id="dialogText"></div>
+    <div class="dialog-btns">
+      <button class="dialog-no" onclick="hideDialog()">No, go back</button>
+      <button class="dialog-yes" onclick="hideDialog()">Yes</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+
+  function selectTier(el) {
+    document.querySelectorAll('.tier-row').forEach(r => r.classList.remove('selected'));
+    el.classList.add('selected');
+  }
+
+  function showDialog(t) { document.getElementById('dialogText').textContent = t; document.getElementById('confirmDialog').classList.add('show'); }
+  function hideDialog() { document.getElementById('confirmDialog').classList.remove('show'); }
+</script>
+</body>
+</html>

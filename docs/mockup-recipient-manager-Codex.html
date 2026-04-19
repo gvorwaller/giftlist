@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gift Tracker — Codex Admin People</title>
+<style>
+  :root {
+    --bg: #f3f4f2;
+    --card: #ffffff;
+    --ink: #18201c;
+    --muted: #66706a;
+    --line: #d9dfdb;
+    --green: #31594c;
+    --green-soft: #e6efea;
+    --amber: #9b651c;
+    --amber-soft: #fff3e0;
+    --red: #a64e45;
+    --radius: 16px;
+    --shadow: 0 4px 18px rgba(20, 29, 25, 0.07);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    max-width: 430px;
+    margin: 0 auto;
+    min-height: 100vh;
+    background: linear-gradient(180deg, #eef1ed 0%, var(--bg) 100%);
+    color: var(--ink);
+    font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  }
+  .banner {
+    background: #f7e2b7;
+    color: #6f4d10;
+    text-align: center;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .header {
+    padding: 18px;
+    position: sticky;
+    top: 0;
+    background: rgba(243, 244, 242, 0.96);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
+  .title { margin-top: 6px; font-size: 28px; font-weight: 800; }
+  .subtitle { margin-top: 6px; color: var(--muted); font-size: 15px; line-height: 1.45; }
+  .screen { padding: 18px 18px 32px; }
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .search {
+    width: 100%;
+    min-height: 50px;
+    border: 2px solid #d7ded8;
+    border-radius: 14px;
+    padding: 12px 14px;
+    font-size: 17px;
+    margin-bottom: 14px;
+  }
+  .btn {
+    width: 100%;
+    min-height: 52px;
+    border-radius: 14px;
+    font-size: 17px;
+    font-weight: 700;
+    border: none;
+    margin-top: 12px;
+  }
+  .btn.primary { background: var(--green); color: white; }
+  .btn.secondary { background: white; color: var(--green); border: 2px solid var(--green); }
+  .btn.danger { background: white; color: var(--red); border: 2px solid var(--red); }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid #edf1ee;
+  }
+  .row:last-child { border-bottom: none; }
+  .avatar {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: var(--green-soft);
+    color: var(--green);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .name { font-size: 18px; font-weight: 700; }
+  .meta { margin-top: 2px; color: var(--muted); font-size: 14px; line-height: 1.35; }
+  .tag {
+    margin-left: auto;
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: var(--amber-soft);
+    color: var(--amber);
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .section { margin: 18px 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 800; }
+  .field { margin-bottom: 14px; }
+  label { display: block; margin-bottom: 6px; font-size: 14px; font-weight: 700; }
+  input, select, textarea {
+    width: 100%;
+    min-height: 48px;
+    border: 2px solid #d7ded8;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 16px;
+    background: white;
+  }
+  textarea { min-height: 88px; resize: none; }
+  .chip {
+    display: inline-block;
+    margin: 0 8px 8px 0;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: var(--green-soft);
+    color: var(--green);
+    font-size: 13px;
+    font-weight: 800;
+  }
+</style>
+</head>
+<body>
+<div class="banner">UI MOCKUP — Codex Admin Redesign</div>
+
+<header class="header">
+  <div class="eyebrow">Admin</div>
+  <div class="title">People</div>
+  <div class="subtitle">Fast maintenance tools for the admin. Keep complexity here, not in the manager experience.</div>
+</header>
+
+<main class="screen">
+  <input class="search" type="text" value="mar" aria-label="Search people">
+
+  <button class="btn primary">Add Person</button>
+
+  <div class="section">Needs Admin Cleanup</div>
+  <div class="panel">
+    <div class="row">
+      <div class="avatar">T</div>
+      <div>
+        <div class="name">Taylor Nguyen</div>
+        <div class="meta">No relationship set. No event assigned yet.</div>
+      </div>
+      <div class="tag">Review</div>
+    </div>
+  </div>
+
+  <div class="section">All People</div>
+  <div class="panel">
+    <div class="row">
+      <div class="avatar">M</div>
+      <div>
+        <div class="name">Marcus</div>
+        <div class="meta">Son. Birthday in 18 days. 7 gifts tracked.</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="avatar">S</div>
+      <div>
+        <div class="name">Sarah</div>
+        <div class="meta">Daughter-in-law. Anniversary in 26 days.</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="avatar">M</div>
+      <div>
+        <div class="name">Mom</div>
+        <div class="meta">Mother. Mother's Day coming soon.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">Edit Person</div>
+  <div class="panel">
+    <div class="field">
+      <label>Display name</label>
+      <input type="text" value="Marcus">
+    </div>
+    <div class="field">
+      <label>Full name</label>
+      <input type="text" value="Marcus Johnson">
+    </div>
+    <div class="field">
+      <label>Relationship</label>
+      <select>
+        <option selected>Son</option>
+        <option>Daughter</option>
+        <option>Friend</option>
+        <option>Other</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Default shipping address</label>
+      <textarea>123 Oak St, Austin TX 78701</textarea>
+    </div>
+    <div class="field">
+      <label>Notes</label>
+      <textarea>Loves hiking, coffee, vinyl. Prefers experience gifts.</textarea>
+    </div>
+
+    <div class="section" style="margin-top:6px;">Aliases</div>
+    <div>
+      <span class="chip">Marcus Johnson</span>
+      <span class="chip">M. Johnson</span>
+    </div>
+
+    <button class="btn primary">Save Changes</button>
+    <button class="btn secondary">Merge Duplicate</button>
+    <button class="btn danger">Archive Person</button>
+  </div>
+</main>
+</body>
+</html>

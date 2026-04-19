@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gift Tracker — Amazon CSV Import</title>
+<style>
+  :root {
+    --primary: #2E6B4F;
+    --primary-light: #E8F5EE;
+    --accent: #D4763A;
+    --danger: #C0392B;
+    --text: #1A1A1A;
+    --text-muted: #4A4A4A;
+    --bg: #FAFAF8;
+    --card: #FFFFFF;
+    --border: #D6D6D6;
+    --badge-exact: #27AE60;
+    --badge-fuzzy: #E67E22;
+    --badge-new: #3498DB;
+    --badge-skip: #999;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-size: 18px; line-height: 1.5; color: var(--text);
+    background: var(--bg); max-width: 430px; margin: 0 auto; min-height: 100vh;
+  }
+  .mockup-banner { background: #FFF3CD; border-bottom: 1px solid #FFECB5; padding: 8px 16px; text-align: center; font-size: 13px; color: #856404; font-weight: 600; }
+  .app-header { background: var(--primary); color: white; padding: 16px 20px 14px; position: sticky; top: 0; z-index: 100; }
+  .app-header .date-line { font-size: 14px; opacity: 0.85; margin-bottom: 2px; }
+  .app-header .page-title { font-size: 22px; font-weight: 700; }
+  .back-btn { background: rgba(255,255,255,0.18); color: white; border: none; border-radius: 8px; padding: 8px 14px; font-size: 15px; font-weight: 600; cursor: pointer; min-height: 44px; margin-top: 10px; display: inline-flex; align-items: center; gap: 6px; }
+
+  .screen { padding: 16px 16px 100px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .card-title { font-size: 17px; font-weight: 700; color: var(--primary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .card-title .icon { font-size: 20px; }
+  .section-label { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin: 20px 0 8px; }
+
+  .action-btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 16px; border: none; border-radius: var(--radius); font-size: 18px; font-weight: 600; cursor: pointer; min-height: 56px; margin-bottom: 10px; }
+  .action-btn.primary { background: var(--primary); color: white; }
+  .action-btn.secondary { background: white; color: var(--primary); border: 2px solid var(--primary); }
+  .action-btn.muted { background: #F0F0F0; color: var(--text-muted); }
+  .action-btn:active { transform: scale(0.98); }
+
+  .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: 600; color: white; white-space: nowrap; }
+  .badge-exact { background: var(--badge-exact); }
+  .badge-fuzzy { background: var(--badge-fuzzy); }
+  .badge-new { background: var(--badge-new); }
+  .badge-skip { background: var(--badge-skip); }
+
+  /* Step Indicator */
+  .steps { display: flex; justify-content: center; gap: 4px; margin-bottom: 18px; }
+  .step { width: 60px; height: 6px; border-radius: 3px; background: #DDD; }
+  .step.done { background: var(--primary); }
+  .step.current { background: var(--accent); }
+
+  /* Upload Area */
+  .upload-zone {
+    border: 3px dashed var(--border); border-radius: var(--radius);
+    padding: 40px 20px; text-align: center; margin-bottom: 14px;
+    background: #FAFAF8; cursor: pointer;
+  }
+  .upload-zone .upload-icon { font-size: 48px; margin-bottom: 10px; }
+  .upload-zone .upload-text { font-size: 18px; font-weight: 600; color: var(--primary); }
+  .upload-zone .upload-hint { font-size: 14px; color: var(--text-muted); margin-top: 4px; }
+
+  /* Review Table */
+  .review-item {
+    padding: 14px 0; border-bottom: 1px solid #ECECEC;
+  }
+  .review-item:last-child { border-bottom: none; }
+  .review-product { font-size: 17px; font-weight: 600; }
+  .review-meta { font-size: 14px; color: var(--text-muted); margin-top: 3px; }
+  .review-match { margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .match-label { font-size: 15px; }
+  .review-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .review-btn { padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; min-height: 44px; }
+  .review-btn.approve { background: var(--primary); color: white; }
+  .review-btn.reassign { background: #F0ECF8; color: #6C3FA0; }
+  .review-btn.skip { background: #F0F0F0; color: var(--text-muted); }
+  .review-btn.new-person { background: #E8F4FD; color: #2980B9; }
+
+  /* Summary Stats */
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat-box { text-align: center; padding: 16px; background: #F8F8F6; border-radius: 10px; }
+  .stat-number { font-size: 28px; font-weight: 700; color: var(--primary); }
+  .stat-label { font-size: 13px; color: var(--text-muted); font-weight: 600; margin-top: 2px; }
+
+  /* Import History */
+  .history-row { padding: 12px 0; border-bottom: 1px solid #ECECEC; }
+  .history-row:last-child { border-bottom: none; }
+  .history-date { font-size: 15px; font-weight: 600; }
+  .history-detail { font-size: 14px; color: var(--text-muted); margin-top: 2px; }
+
+  .dialog-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 200; align-items: center; justify-content: center; padding: 20px; }
+  .dialog-overlay.show { display: flex; }
+  .dialog-box { background: white; border-radius: 16px; padding: 28px 24px; max-width: 360px; width: 100%; text-align: center; }
+  .dialog-text { font-size: 19px; margin-bottom: 20px; line-height: 1.4; }
+  .dialog-btns { display: flex; gap: 10px; }
+  .dialog-btns button { flex: 1; padding: 14px; border-radius: 10px; font-size: 17px; font-weight: 600; cursor: pointer; border: none; min-height: 52px; }
+  .dialog-yes { background: var(--primary); color: white; }
+  .dialog-no { background: #F0F0F0; color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="mockup-banner">UI MOCKUP — Amazon CSV Import</div>
+
+<header class="app-header">
+  <div class="date-line" id="todayDate"></div>
+  <div class="page-title" id="pageTitle">Amazon CSV Import</div>
+  <button class="back-btn" onclick="showStep('upload')">← Back to Admin</button>
+</header>
+
+<div class="screen">
+  <!-- Step Indicator -->
+  <div class="steps">
+    <div class="step current" id="step-dot-1"></div>
+    <div class="step" id="step-dot-2"></div>
+    <div class="step" id="step-dot-3"></div>
+  </div>
+
+  <!-- ═══ STEP 1: UPLOAD ═══ -->
+  <div id="step-upload">
+    <div class="upload-zone" onclick="showStep('preview')">
+      <div class="upload-icon">📄</div>
+      <div class="upload-text">Tap to choose a CSV file</div>
+      <div class="upload-hint">Accepts Retail.OrderHistory.1.csv from Amazon Privacy Central</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="icon">ℹ️</span> How to get your Amazon CSV</div>
+      <div style="font-size:16px; line-height:1.6; color:var(--text-muted);">
+        <p style="margin-bottom:10px;"><strong>1.</strong> Go to <span style="color:var(--primary);">amazon.com/hz/privacy-central</span></p>
+        <p style="margin-bottom:10px;"><strong>2.</strong> Click "Request Your Data"</p>
+        <p style="margin-bottom:10px;"><strong>3.</strong> Select "Your Orders"</p>
+        <p><strong>4.</strong> Download the ZIP and find <strong>Retail.OrderHistory.1.csv</strong></p>
+      </div>
+    </div>
+
+    <div class="section-label">Previous Imports</div>
+    <div class="card">
+      <div class="history-row">
+        <div class="history-date">March 25, 2026</div>
+        <div class="history-detail">12 rows · 8 imported · 4 skipped (duplicates)</div>
+      </div>
+      <div class="history-row">
+        <div class="history-date">January 10, 2026</div>
+        <div class="history-detail">47 rows · 31 imported · 12 skipped · 4 errors</div>
+      </div>
+      <div class="history-row">
+        <div class="history-date">December 1, 2025</div>
+        <div class="history-detail">23 rows · 20 imported · 3 skipped</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ STEP 2: PREVIEW & REVIEW ═══ -->
+  <div id="step-preview" style="display:none;">
+    <div class="card">
+      <div class="card-title"><span class="icon">📊</span> File Parsed Successfully</div>
+      <div class="stat-grid">
+        <div class="stat-box">
+          <div class="stat-number">18</div>
+          <div class="stat-label">Total Rows</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-number">3</div>
+          <div class="stat-label">Duplicates (skip)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-number">12</div>
+          <div class="stat-label">Exact Matches</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-number" style="color:var(--accent);">3</div>
+          <div class="stat-label">Need Review</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Needs Your Review (3)</div>
+
+    <div class="card">
+      <div class="review-item">
+        <div class="review-product">Kindle Paperwhite (16 GB)</div>
+        <div class="review-meta">Order #111-3847291-8483721 · $149.99 · March 15</div>
+        <div class="review-match">
+          <span class="badge badge-fuzzy">Fuzzy 87%</span>
+          <span class="match-label">Shipped to "M. Johnson" → <strong>Marcus?</strong></span>
+        </div>
+        <div class="review-actions">
+          <button class="review-btn approve">Yes, it's Marcus</button>
+          <button class="review-btn reassign">Someone else</button>
+          <button class="review-btn skip">Skip</button>
+        </div>
+      </div>
+
+      <div class="review-item">
+        <div class="review-product">LEGO Architecture Taj Mahal</div>
+        <div class="review-meta">Order #111-9281736-1029384 · $119.99 · March 8</div>
+        <div class="review-match">
+          <span class="badge badge-fuzzy">Fuzzy 72%</span>
+          <span class="match-label">Shipped to "Jacob W." → <strong>Jake?</strong></span>
+        </div>
+        <div class="review-actions">
+          <button class="review-btn approve">Yes, it's Jake</button>
+          <button class="review-btn reassign">Someone else</button>
+          <button class="review-btn skip">Skip</button>
+        </div>
+      </div>
+
+      <div class="review-item">
+        <div class="review-product">Hydro Flask 32 oz</div>
+        <div class="review-meta">Order #111-5738192-4829301 · $44.95 · Feb 28</div>
+        <div class="review-match">
+          <span class="badge badge-new">No Match</span>
+          <span class="match-label">Shipped to "Taylor Nguyen"</span>
+        </div>
+        <div class="review-actions">
+          <button class="review-btn new-person">Add as New Person</button>
+          <button class="review-btn reassign">Assign to Someone</button>
+          <button class="review-btn skip">Skip</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Auto-Matched (12)</div>
+    <div class="card">
+      <div class="review-item">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div class="review-product">Running Shoes — Nike Pegasus</div>
+            <div class="review-meta">$129.99 · March 20 · for Sarah</div>
+          </div>
+          <span class="badge badge-exact">Exact</span>
+        </div>
+      </div>
+      <div class="review-item">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div class="review-product">Cast Iron Skillet — Lodge 12"</div>
+            <div class="review-meta">$34.90 · March 18 · for Mom</div>
+          </div>
+          <span class="badge badge-exact">Exact</span>
+        </div>
+      </div>
+      <div class="review-item">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div class="review-product">Rechargeable Flashlight</div>
+            <div class="review-meta">$28.99 · March 12 · for Dad</div>
+          </div>
+          <span class="badge badge-exact">Exact</span>
+        </div>
+      </div>
+      <div style="text-align:center; padding:10px 0; font-size:15px; color:var(--text-muted);">+ 9 more exact matches</div>
+    </div>
+
+    <button class="action-btn primary" onclick="showStep('summary')">Import 15 Gifts</button>
+    <button class="action-btn muted" onclick="showStep('upload')">Cancel Import</button>
+  </div>
+
+  <!-- ═══ STEP 3: SUMMARY ═══ -->
+  <div id="step-summary" style="display:none;">
+    <div class="card" style="text-align:center; padding:30px 20px;">
+      <div style="font-size:48px; margin-bottom:10px;">✅</div>
+      <div style="font-size:22px; font-weight:700; margin-bottom:6px;">Import Complete!</div>
+      <div style="font-size:16px; color:var(--text-muted);">Here's what happened:</div>
+    </div>
+
+    <div class="card">
+      <div class="stat-grid">
+        <div class="stat-box">
+          <div class="stat-number">15</div>
+          <div class="stat-label">Gifts Imported</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-number">3</div>
+          <div class="stat-label">Skipped</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-number">1</div>
+          <div class="stat-label">New Person Added</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-number">2</div>
+          <div class="stat-label">New Aliases Saved</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="icon">👤</span> New Person Added</div>
+      <div style="font-size:17px;"><strong>Taylor Nguyen</strong></div>
+      <div style="font-size:15px; color:var(--text-muted); margin-top:4px;">1 gift imported. You may want to add their relationship and upcoming occasions.</div>
+      <button class="action-btn secondary" style="margin-top:12px;">Edit Taylor's Profile</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="icon">🔗</span> Aliases Saved for Future Imports</div>
+      <div style="font-size:16px; line-height:1.8;">
+        <div>"M. Johnson" → <strong>Marcus</strong></div>
+        <div>"Jacob W." → <strong>Jake</strong></div>
+      </div>
+      <div style="font-size:14px; color:var(--text-muted); margin-top:8px;">Next time these names appear, they'll match automatically.</div>
+    </div>
+
+    <button class="action-btn primary" onclick="showStep('upload')">Done</button>
+  </div>
+</div>
+
+<div class="dialog-overlay" id="confirmDialog">
+  <div class="dialog-box">
+    <div class="dialog-text" id="dialogText"></div>
+    <div class="dialog-btns">
+      <button class="dialog-no" onclick="hideDialog()">No, go back</button>
+      <button class="dialog-yes" onclick="hideDialog()">Yes</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+
+  function showStep(step) {
+    document.getElementById('step-upload').style.display = 'none';
+    document.getElementById('step-preview').style.display = 'none';
+    document.getElementById('step-summary').style.display = 'none';
+    document.getElementById('step-' + step).style.display = 'block';
+
+    const dots = { upload: [1,0,0], preview: [1,1,0], summary: [1,1,1] };
+    const d = dots[step];
+    for (let i = 1; i <= 3; i++) {
+      const el = document.getElementById('step-dot-' + i);
+      el.className = 'step';
+      if (d[i-1] && i < d.indexOf(0)+1 || (step==='summary')) el.classList.add('done');
+    }
+    if (step === 'upload') { document.getElementById('step-dot-1').className = 'step current'; }
+    if (step === 'preview') { document.getElementById('step-dot-1').className = 'step done'; document.getElementById('step-dot-2').className = 'step current'; }
+    if (step === 'summary') { document.getElementById('step-dot-1').className = 'step done'; document.getElementById('step-dot-2').className = 'step done'; document.getElementById('step-dot-3').className = 'step done'; }
+
+    const titles = { upload: 'Amazon CSV Import', preview: 'Review Matches', summary: 'Import Complete' };
+    document.getElementById('pageTitle').textContent = titles[step];
+  }
+
+  function showDialog(t) { document.getElementById('dialogText').textContent = t; document.getElementById('confirmDialog').classList.add('show'); }
+  function hideDialog() { document.getElementById('confirmDialog').classList.remove('show'); }
+</script>
+</body>
+</html>

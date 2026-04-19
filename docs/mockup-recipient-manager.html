@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gift Tracker — Recipient Manager</title>
+<style>
+  :root {
+    --primary: #2E6B4F; --primary-light: #E8F5EE; --accent: #D4763A; --danger: #C0392B;
+    --text: #1A1A1A; --text-muted: #4A4A4A; --bg: #FAFAF8; --card: #FFFFFF; --border: #D6D6D6; --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; font-size: 18px; line-height: 1.5; color: var(--text); background: var(--bg); max-width: 430px; margin: 0 auto; min-height: 100vh; }
+  .mockup-banner { background: #FFF3CD; border-bottom: 1px solid #FFECB5; padding: 8px 16px; text-align: center; font-size: 13px; color: #856404; font-weight: 600; }
+  .app-header { background: var(--primary); color: white; padding: 16px 20px 14px; position: sticky; top: 0; z-index: 100; }
+  .app-header .date-line { font-size: 14px; opacity: 0.85; margin-bottom: 2px; }
+  .app-header .page-title { font-size: 22px; font-weight: 700; }
+  .back-btn { background: rgba(255,255,255,0.18); color: white; border: none; border-radius: 8px; padding: 8px 14px; font-size: 15px; font-weight: 600; cursor: pointer; min-height: 44px; margin-top: 10px; display: inline-flex; align-items: center; gap: 6px; }
+
+  .screen { padding: 16px 16px 100px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .card-title { font-size: 17px; font-weight: 700; color: var(--primary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .card-title .icon { font-size: 20px; }
+  .section-label { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin: 20px 0 8px; }
+
+  .action-btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 16px; border: none; border-radius: var(--radius); font-size: 18px; font-weight: 600; cursor: pointer; min-height: 56px; margin-bottom: 10px; }
+  .action-btn.primary { background: var(--primary); color: white; }
+  .action-btn.secondary { background: white; color: var(--primary); border: 2px solid var(--primary); }
+  .action-btn.danger { background: white; color: var(--danger); border: 2px solid var(--danger); }
+  .action-btn:active { transform: scale(0.98); }
+
+  .search-bar { width: 100%; padding: 14px 16px; font-size: 17px; border: 2px solid var(--border); border-radius: var(--radius); background: white; margin-bottom: 14px; min-height: 48px; }
+  .search-bar:focus { outline: none; border-color: var(--primary); }
+
+  .recipient-avatar { width: 48px; height: 48px; border-radius: 50%; background: var(--primary-light); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700; flex-shrink: 0; }
+  .recipient-item { display: flex; align-items: center; padding: 14px 0; border-bottom: 1px solid #ECECEC; cursor: pointer; gap: 14px; }
+  .recipient-item:last-child { border-bottom: none; }
+  .recipient-name { font-size: 18px; font-weight: 600; }
+  .recipient-rel { font-size: 14px; color: var(--text-muted); }
+  .recipient-arrow { margin-left: auto; font-size: 20px; color: #BBB; }
+
+  .detail-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #F0F0F0; font-size: 17px; }
+  .detail-row:last-child { border-bottom: none; }
+  .detail-label { color: var(--text-muted); font-weight: 500; }
+  .detail-value { font-weight: 600; text-align: right; max-width: 60%; }
+
+  .alias-tag { display: inline-flex; align-items: center; gap: 6px; background: #F0ECF8; color: #6C3FA0; border-radius: 20px; padding: 6px 14px; font-size: 14px; font-weight: 600; margin: 0 6px 6px 0; }
+  .alias-remove { cursor: pointer; font-size: 16px; opacity: 0.6; }
+
+  .occasion-chip { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #F0F0F0; }
+  .occasion-chip:last-child { border-bottom: none; }
+  .occasion-name { font-size: 17px; font-weight: 600; }
+  .occasion-date { font-size: 14px; color: var(--text-muted); }
+  .toggle { width: 52px; height: 30px; border-radius: 15px; border: none; cursor: pointer; position: relative; flex-shrink: 0; }
+  .toggle.on { background: var(--primary); }
+  .toggle.off { background: #CCC; }
+  .toggle::after { content: ''; position: absolute; width: 24px; height: 24px; border-radius: 50%; background: white; top: 3px; transition: left 0.2s; }
+  .toggle.on::after { left: 25px; }
+  .toggle.off::after { left: 3px; }
+
+  .merge-preview { display: flex; align-items: center; gap: 10px; padding: 14px; background: #FFF8F0; border-radius: 10px; border-left: 4px solid var(--accent); margin-bottom: 12px; }
+  .merge-arrow { font-size: 20px; color: var(--accent); }
+
+  .form-field { margin-bottom: 16px; }
+  .form-field label { font-size: 15px; font-weight: 600; display: block; margin-bottom: 6px; }
+  .form-field input, .form-field textarea, .form-field select {
+    width: 100%; padding: 14px; font-size: 17px; border: 2px solid var(--border); border-radius: 10px; min-height: 48px; background: white;
+  }
+
+  .dialog-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 200; align-items: center; justify-content: center; padding: 20px; }
+  .dialog-overlay.show { display: flex; }
+  .dialog-box { background: white; border-radius: 16px; padding: 28px 24px; max-width: 360px; width: 100%; text-align: center; }
+  .dialog-text { font-size: 19px; margin-bottom: 20px; line-height: 1.4; }
+  .dialog-btns { display: flex; gap: 10px; }
+  .dialog-btns button { flex: 1; padding: 14px; border-radius: 10px; font-size: 17px; font-weight: 600; cursor: pointer; border: none; min-height: 52px; }
+  .dialog-yes { background: var(--primary); color: white; }
+  .dialog-no { background: #F0F0F0; color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="mockup-banner">UI MOCKUP — Recipient Manager</div>
+
+<header class="app-header">
+  <div class="date-line" id="todayDate"></div>
+  <div class="page-title" id="pageTitle">Manage People</div>
+  <button class="back-btn" onclick="showView('list')">← Back to Admin</button>
+</header>
+
+<div class="screen">
+
+  <!-- ═══ RECIPIENT LIST VIEW ═══ -->
+  <div id="view-list">
+    <input type="text" class="search-bar" placeholder="Search by name or relationship…">
+
+    <button class="action-btn primary" onclick="showView('add')">👤 Add New Person</button>
+
+    <div class="card">
+      <div class="recipient-item" onclick="showView('edit')">
+        <div class="recipient-avatar">M</div>
+        <div>
+          <div class="recipient-name">Marcus</div>
+          <div class="recipient-rel">Son · 2 aliases · 3 occasions</div>
+        </div>
+        <div class="recipient-arrow">›</div>
+      </div>
+      <div class="recipient-item">
+        <div class="recipient-avatar">S</div>
+        <div>
+          <div class="recipient-name">Sarah</div>
+          <div class="recipient-rel">Daughter-in-law · 1 alias · 2 occasions</div>
+        </div>
+        <div class="recipient-arrow">›</div>
+      </div>
+      <div class="recipient-item">
+        <div class="recipient-avatar">M</div>
+        <div>
+          <div class="recipient-name">Mom</div>
+          <div class="recipient-rel">Mother · 0 aliases · 3 occasions</div>
+        </div>
+        <div class="recipient-arrow">›</div>
+      </div>
+      <div class="recipient-item">
+        <div class="recipient-avatar">D</div>
+        <div>
+          <div class="recipient-name">Dad</div>
+          <div class="recipient-rel">Father · 1 alias · 3 occasions</div>
+        </div>
+        <div class="recipient-arrow">›</div>
+      </div>
+      <div class="recipient-item">
+        <div class="recipient-avatar">J</div>
+        <div>
+          <div class="recipient-name">Jake</div>
+          <div class="recipient-rel">Nephew · 1 alias · 2 occasions</div>
+        </div>
+        <div class="recipient-arrow">›</div>
+      </div>
+      <div class="recipient-item">
+        <div class="recipient-avatar">L</div>
+        <div>
+          <div class="recipient-name">Lisa</div>
+          <div class="recipient-rel">Friend · 0 aliases · 1 occasion</div>
+        </div>
+        <div class="recipient-arrow">›</div>
+      </div>
+      <div class="recipient-item">
+        <div class="recipient-avatar">T</div>
+        <div>
+          <div class="recipient-name">Taylor Nguyen</div>
+          <div class="recipient-rel">No relationship set · 0 occasions</div>
+        </div>
+        <div class="recipient-arrow">›</div>
+      </div>
+    </div>
+
+    <div class="section-label">Tools</div>
+    <button class="action-btn secondary" onclick="showView('merge')">🔗 Merge Duplicate People</button>
+  </div>
+
+  <!-- ═══ EDIT RECIPIENT VIEW ═══ -->
+  <div id="view-edit" style="display:none;">
+    <div class="card">
+      <div style="display:flex; align-items:center; gap:14px; margin-bottom:16px;">
+        <div class="recipient-avatar" style="width:56px;height:56px;font-size:24px;">M</div>
+        <div>
+          <div style="font-size:22px; font-weight:700;">Marcus</div>
+          <div style="font-size:14px; color:var(--text-muted);">7 gifts tracked · Member since Dec 2025</div>
+        </div>
+      </div>
+
+      <div class="form-field">
+        <label>Display Name</label>
+        <input type="text" value="Marcus">
+      </div>
+      <div class="form-field">
+        <label>Canonical Name (for Amazon matching)</label>
+        <input type="text" value="Marcus Johnson">
+      </div>
+      <div class="form-field">
+        <label>Relationship</label>
+        <select>
+          <option selected>Son</option>
+          <option>Daughter</option>
+          <option>Friend</option>
+          <option>Parent</option>
+          <option>Sibling</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>Shipping Address</label>
+        <textarea rows="2">123 Oak St, Austin TX 78701</textarea>
+      </div>
+      <div class="form-field">
+        <label>Notes & Preferences</label>
+        <textarea rows="3">Loves hiking, coffee, vinyl records. Wears size L. Prefers experience gifts over things.</textarea>
+      </div>
+    </div>
+
+    <!-- Aliases -->
+    <div class="card">
+      <div class="card-title"><span class="icon">🔗</span> Name Aliases</div>
+      <div style="font-size:15px; color:var(--text-muted); margin-bottom:12px;">These names will auto-match to Marcus during CSV imports.</div>
+      <div style="margin-bottom:12px;">
+        <span class="alias-tag">Marcus Johnson <span class="alias-remove" onclick="showDialog('Remove alias \"Marcus Johnson\"?')">×</span></span>
+        <span class="alias-tag">M. Johnson <span class="alias-remove" onclick="showDialog('Remove alias \"M. Johnson\"?')">×</span></span>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <input type="text" placeholder="Add new alias…" style="flex:1; padding:12px; font-size:16px; border:2px solid var(--border); border-radius:10px; min-height:48px;">
+        <button style="padding:12px 18px; background:var(--primary); color:white; border:none; border-radius:10px; font-size:16px; font-weight:600; min-height:48px; min-width:48px; cursor:pointer;">+</button>
+      </div>
+    </div>
+
+    <!-- Occasion Assignments -->
+    <div class="card">
+      <div class="card-title"><span class="icon">🎂</span> Occasion Assignments</div>
+      <div style="font-size:15px; color:var(--text-muted); margin-bottom:12px;">Toggle which occasions apply to Marcus.</div>
+
+      <div class="occasion-chip">
+        <div>
+          <div class="occasion-name">Birthday</div>
+          <div class="occasion-date">April 20 (annual) · 21-day lead</div>
+        </div>
+        <button class="toggle on" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+      </div>
+      <div class="occasion-chip">
+        <div>
+          <div class="occasion-name">Christmas</div>
+          <div class="occasion-date">December 25 (annual) · 30-day lead</div>
+        </div>
+        <button class="toggle on" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+      </div>
+      <div class="occasion-chip">
+        <div>
+          <div class="occasion-name">Valentine's Day</div>
+          <div class="occasion-date">February 14 (annual)</div>
+        </div>
+        <button class="toggle off" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+      </div>
+      <div class="occasion-chip">
+        <div>
+          <div class="occasion-name">Father's Day</div>
+          <div class="occasion-date">June 15 (annual)</div>
+        </div>
+        <button class="toggle off" onclick="this.classList.toggle('on'); this.classList.toggle('off');"></button>
+      </div>
+
+      <div style="margin-top:12px; font-size:15px; color:var(--text-muted);">
+        Per-person note: <em>"Marcus prefers experience gifts for birthdays"</em>
+      </div>
+    </div>
+
+    <button class="action-btn primary" onclick="showDialog('Save changes to Marcus?')">Save Changes</button>
+    <button class="action-btn secondary" onclick="showView('list')">Cancel</button>
+    <button class="action-btn danger" onclick="showDialog('Remove Marcus from the gift tracker? His gift history will be preserved but hidden.')">Remove Person</button>
+  </div>
+
+  <!-- ═══ ADD NEW PERSON ═══ -->
+  <div id="view-add" style="display:none;">
+    <div class="card">
+      <div class="card-title"><span class="icon">👤</span> Add New Person</div>
+      <div class="form-field">
+        <label>Display Name</label>
+        <input type="text" placeholder="How you refer to them (e.g. Mom, Marcus)">
+      </div>
+      <div class="form-field">
+        <label>Full Name (for Amazon matching)</label>
+        <input type="text" placeholder="Name as it appears on Amazon orders">
+      </div>
+      <div class="form-field">
+        <label>Relationship</label>
+        <select>
+          <option value="">Choose one…</option>
+          <option>Son</option><option>Daughter</option><option>Mother</option><option>Father</option>
+          <option>Sibling</option><option>Friend</option><option>Spouse</option><option>In-law</option>
+          <option>Nephew</option><option>Niece</option><option>Coworker</option><option>Other</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>Shipping Address (optional)</label>
+        <textarea rows="2" placeholder="Street, City, State ZIP"></textarea>
+      </div>
+      <div class="form-field">
+        <label>Notes (optional)</label>
+        <textarea rows="2" placeholder="Sizes, preferences, things to avoid…"></textarea>
+      </div>
+    </div>
+
+    <button class="action-btn primary" onclick="showDialog('Add this person to the gift tracker?')">Add Person</button>
+    <button class="action-btn secondary" onclick="showView('list')">Cancel</button>
+  </div>
+
+  <!-- ═══ MERGE DUPLICATES ═══ -->
+  <div id="view-merge" style="display:none;">
+    <div class="card">
+      <div class="card-title"><span class="icon">🔗</span> Merge Duplicate People</div>
+      <div style="font-size:16px; color:var(--text-muted); margin-bottom:16px;">Select two people to merge. All gifts and aliases from the secondary person will be moved to the primary person.</div>
+
+      <div class="form-field">
+        <label>Keep this person (primary)</label>
+        <select>
+          <option>Choose…</option><option selected>Marcus</option><option>Sarah</option><option>Mom</option><option>Dad</option><option>Jake</option><option>Lisa</option><option>Taylor Nguyen</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>Merge this person into them</label>
+        <select>
+          <option>Choose…</option><option>Marcus</option><option>Sarah</option><option>Mom</option><option>Dad</option><option>Jake</option><option>Lisa</option><option selected>Taylor Nguyen</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="merge-preview">
+      <div class="recipient-avatar" style="width:40px;height:40px;font-size:16px;">T</div>
+      <div class="merge-arrow">→</div>
+      <div class="recipient-avatar" style="width:40px;height:40px;font-size:16px;">M</div>
+      <div style="font-size:16px; margin-left:6px;">
+        <strong>Taylor Nguyen</strong> merges into <strong>Marcus</strong>
+        <div style="font-size:13px; color:var(--text-muted);">1 gift + 0 aliases will be transferred</div>
+      </div>
+    </div>
+
+    <button class="action-btn primary" onclick="showDialog('Merge Taylor Nguyen into Marcus? This moves all gifts and aliases. Taylor Nguyen will be removed.')">Merge People</button>
+    <button class="action-btn secondary" onclick="showView('list')">Cancel</button>
+  </div>
+</div>
+
+<div class="dialog-overlay" id="confirmDialog">
+  <div class="dialog-box">
+    <div class="dialog-text" id="dialogText"></div>
+    <div class="dialog-btns">
+      <button class="dialog-no" onclick="hideDialog()">No, go back</button>
+      <button class="dialog-yes" onclick="hideDialog()">Yes</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+
+  const viewTitles = { list: 'Manage People', edit: 'Edit — Marcus', add: 'Add New Person', merge: 'Merge Duplicates' };
+
+  function showView(id) {
+    ['list','edit','add','merge'].forEach(v => document.getElementById('view-' + v).style.display = 'none');
+    document.getElementById('view-' + id).style.display = 'block';
+    document.getElementById('pageTitle').textContent = viewTitles[id];
+  }
+
+  function showDialog(t) { document.getElementById('dialogText').textContent = t; document.getElementById('confirmDialog').classList.add('show'); }
+  function hideDialog() { document.getElementById('confirmDialog').classList.remove('show'); }
+</script>
+</body>
+</html>

@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gift Tracker — Codex Main Mockup</title>
+<style>
+  :root {
+    --bg: #f5f1e8;
+    --paper: #fffdf8;
+    --ink: #1f2a24;
+    --muted: #5e675f;
+    --line: #ddd2c2;
+    --green: #2f5d50;
+    --green-soft: #e6efe9;
+    --amber: #bd7a2a;
+    --amber-soft: #fff2df;
+    --rose: #a54d43;
+    --shadow: 0 6px 20px rgba(47, 35, 18, 0.08);
+    --radius: 18px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: Georgia, "Times New Roman", serif;
+    background:
+      radial-gradient(circle at top left, #fff8eb 0, transparent 32%),
+      linear-gradient(180deg, #efe8dc 0%, var(--bg) 22%, var(--bg) 100%);
+    color: var(--ink);
+    min-height: 100vh;
+    max-width: 430px;
+    margin: 0 auto;
+  }
+
+  .sans { font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif; }
+
+  .banner {
+    background: #f4e1ba;
+    color: #6b4d12;
+    text-align: center;
+    padding: 8px 12px;
+    font: 600 12px/1.2 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    border-bottom: 1px solid #e4cb98;
+  }
+
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(245, 241, 232, 0.95);
+    backdrop-filter: blur(10px);
+    padding: 18px 18px 12px;
+    border-bottom: 1px solid rgba(221, 210, 194, 0.9);
+  }
+
+  .date {
+    font: 600 13px/1.3 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .title {
+    margin-top: 6px;
+    font-size: 31px;
+    line-height: 1.05;
+  }
+
+  .subtitle {
+    margin-top: 8px;
+    font: 500 16px/1.45 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--muted);
+  }
+
+  .screen {
+    display: none;
+    padding: 18px 18px 96px;
+  }
+
+  .screen.active { display: block; }
+
+  .panel {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 18px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow);
+  }
+
+  .hero {
+    background: linear-gradient(135deg, #fdf7ea 0%, #fffdf8 60%);
+    border: 1px solid #e7d8bc;
+  }
+
+  .eyebrow {
+    font: 700 12px/1.2 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    letter-spacing: 0.08em;
+    color: var(--green);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .hero h2 {
+    font-size: 29px;
+    line-height: 1.08;
+    margin-bottom: 10px;
+  }
+
+  .body {
+    font: 500 17px/1.5 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+  }
+
+  .subbody {
+    margin-top: 6px;
+    font: 500 15px/1.45 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--muted);
+  }
+
+  .cta, .secondary {
+    width: 100%;
+    min-height: 54px;
+    border-radius: 14px;
+    border: none;
+    margin-top: 14px;
+    font: 700 17px/1.2 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    cursor: pointer;
+  }
+
+  .cta {
+    background: var(--green);
+    color: white;
+  }
+
+  .secondary {
+    background: transparent;
+    color: var(--green);
+    border: 2px solid var(--green);
+  }
+
+  .section-label {
+    margin: 22px 0 10px;
+    font: 700 12px/1.2 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .row {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 14px 0;
+    border-bottom: 1px solid #efe5d6;
+  }
+
+  .row:last-child { border-bottom: none; }
+
+  .badge {
+    flex-shrink: 0;
+    padding: 7px 10px;
+    border-radius: 999px;
+    font: 700 13px/1.1 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  }
+
+  .b-attn { background: var(--amber-soft); color: #8a5717; }
+  .b-good { background: var(--green-soft); color: var(--green); }
+  .b-soft { background: #f2ece2; color: var(--muted); }
+
+  .row-title {
+    font: 700 19px/1.25 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  }
+
+  .row-copy {
+    margin-top: 3px;
+    font: 500 15px/1.45 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--muted);
+  }
+
+  .pillbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .pill {
+    padding: 9px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: white;
+    font: 700 14px/1.2 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+  }
+
+  .detail-grid {
+    display: grid;
+    gap: 12px;
+  }
+
+  .detail {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #efe5d6;
+    font: 600 16px/1.35 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  }
+
+  .detail:last-child { border-bottom: none; padding-bottom: 0; }
+  .detail span:first-child { color: var(--muted); font-weight: 600; }
+
+  .status-strip {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  .status-box {
+    background: #faf5ed;
+    border: 1px solid #eadbc6;
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .status-box strong {
+    display: block;
+    font: 700 16px/1.2 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  }
+
+  .status-box span {
+    display: block;
+    margin-top: 4px;
+    font: 500 14px/1.35 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--muted);
+  }
+
+  .form-field { margin-bottom: 16px; }
+
+  label {
+    display: block;
+    margin-bottom: 6px;
+    font: 700 14px/1.2 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+  }
+
+  input, select, textarea {
+    width: 100%;
+    min-height: 50px;
+    border: 2px solid #dbcdb8;
+    border-radius: 14px;
+    padding: 12px 14px;
+    background: white;
+    color: var(--ink);
+    font: 500 17px/1.3 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  }
+
+  textarea { min-height: 90px; resize: none; }
+
+  .more {
+    font: 700 15px/1.2 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--green);
+    margin-bottom: 12px;
+  }
+
+  .footer-nav {
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    max-width: 430px;
+    background: rgba(255, 253, 248, 0.97);
+    border-top: 1px solid var(--line);
+    padding: 10px 12px 14px;
+    display: flex;
+    gap: 8px;
+  }
+
+  .navbtn {
+    flex: 1;
+    min-height: 54px;
+    border-radius: 14px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--muted);
+    font: 700 14px/1.2 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  }
+
+  .navbtn.active {
+    background: var(--green-soft);
+    color: var(--green);
+    border-color: #cddfd6;
+  }
+</style>
+</head>
+<body>
+<div class="banner">UI MOCKUP — Codex Redesign</div>
+
+<header class="header">
+  <div class="date sans" id="todayDate"></div>
+  <div class="title" id="pageTitle">Today</div>
+  <div class="subtitle sans" id="pageSubtitle">One clear next step, then everything else.</div>
+</header>
+
+<main>
+  <section class="screen active" id="today">
+    <div class="panel hero">
+      <div class="eyebrow">Next Best Action</div>
+      <h2>Marcus has a birthday coming up on April 20.</h2>
+      <div class="body">No gift is marked bought yet. You already saved 3 ideas, so you do not need to start from scratch.</div>
+      <div class="subbody">The fastest next step is to pick one idea and mark it as bought.</div>
+      <button class="cta" onclick="showScreen('gift')">Choose an Idea for Marcus</button>
+    </div>
+
+    <div class="section-label">Coming Up Soon</div>
+    <div class="panel">
+      <div class="row">
+        <div style="flex:1;">
+          <div class="row-title">Marcus</div>
+          <div class="row-copy">Birthday on April 20. Nothing bought yet.</div>
+        </div>
+        <div class="badge b-attn">Needs action</div>
+      </div>
+      <div class="row">
+        <div style="flex:1;">
+          <div class="row-title">Sarah</div>
+          <div class="row-copy">Anniversary on April 28. Gift already bought.</div>
+        </div>
+        <div class="badge b-good">Handled</div>
+      </div>
+      <div class="row">
+        <div style="flex:1;">
+          <div class="row-title">Mom</div>
+          <div class="row-copy">Mother's Day on May 10. No idea saved yet.</div>
+        </div>
+        <div class="badge b-soft">Soon</div>
+      </div>
+    </div>
+
+    <div class="section-label">Packages On The Way</div>
+    <div class="panel">
+      <div class="row" onclick="showScreen('gift')" style="cursor:pointer;">
+        <div style="flex:1;">
+          <div class="row-title">AirPods Max for Sarah</div>
+          <div class="row-copy">UPS tracking available. Expected April 5.</div>
+        </div>
+        <div class="badge b-good">On the way</div>
+      </div>
+    </div>
+
+    <div class="section-label">Resume</div>
+    <div class="panel">
+      <div class="row" style="padding:0; border:none;">
+        <div style="flex:1;">
+          <div class="row-title">Finish the gift you started for Dad</div>
+          <div class="row-copy">You stopped after typing the title. Nothing was lost.</div>
+        </div>
+      </div>
+      <button class="secondary" onclick="showScreen('add')">Continue Draft</button>
+    </div>
+  </section>
+
+  <section class="screen" id="people">
+    <div class="section-label">People</div>
+    <div class="panel">
+      <div class="row" onclick="showScreen('person')" style="cursor:pointer;">
+        <div style="flex:1;">
+          <div class="row-title">Marcus</div>
+          <div class="row-copy">Birthday in 18 days</div>
+        </div>
+        <div class="badge b-attn">Next up</div>
+      </div>
+      <div class="row">
+        <div style="flex:1;">
+          <div class="row-title">Sarah</div>
+          <div class="row-copy">Anniversary in 26 days</div>
+        </div>
+        <div class="badge b-good">Handled</div>
+      </div>
+      <div class="row">
+        <div style="flex:1;">
+          <div class="row-title">Mom</div>
+          <div class="row-copy">Mother's Day in 38 days</div>
+        </div>
+        <div class="badge b-soft">Watch</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen" id="packages">
+    <div class="section-label">Packages</div>
+    <div class="panel">
+      <div class="row" onclick="showScreen('gift')" style="cursor:pointer;">
+        <div style="flex:1;">
+          <div class="row-title">AirPods Max</div>
+          <div class="row-copy">For Sarah. UPS says delivery is expected April 5.</div>
+        </div>
+        <div class="badge b-good">Tracking</div>
+      </div>
+      <div class="row">
+        <div style="flex:1;">
+          <div class="row-title">Cookbook</div>
+          <div class="row-copy">For Dad. Bought, but no shipment yet.</div>
+        </div>
+        <div class="badge b-soft">Bought</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen" id="person">
+    <div class="panel hero">
+      <div class="eyebrow">Person</div>
+      <h2>Marcus</h2>
+      <div class="body">Birthday on April 20. He likes hiking, coffee, and vinyl.</div>
+      <button class="cta" onclick="showScreen('add')">Add a Gift for Marcus</button>
+    </div>
+
+    <div class="section-label">What Matters Now</div>
+    <div class="panel">
+      <div class="detail-grid">
+        <div class="detail"><span>Next occasion</span><span>Birthday</span></div>
+        <div class="detail"><span>Date</span><span>April 20</span></div>
+        <div class="detail"><span>Saved ideas</span><span>3 ideas ready</span></div>
+      </div>
+    </div>
+
+    <div class="section-label">Ideas</div>
+    <div class="panel">
+      <div class="row">
+        <div style="flex:1;">
+          <div class="row-title">Ember Mug</div>
+          <div class="row-copy">He mentioned wanting one.</div>
+        </div>
+        <div class="badge b-soft">Idea</div>
+      </div>
+      <div class="row">
+        <div style="flex:1;">
+          <div class="row-title">REI Day Pack</div>
+          <div class="row-copy">From his wish list.</div>
+        </div>
+        <div class="badge b-soft">Idea</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen" id="gift">
+    <div class="panel hero">
+      <div class="eyebrow">Gift</div>
+      <h2>AirPods Max</h2>
+      <div class="body sans">For Sarah's anniversary. This gift is already on the way.</div>
+    </div>
+
+    <div class="panel">
+      <div class="detail-grid">
+        <div class="detail"><span>For</span><span>Sarah</span></div>
+        <div class="detail"><span>Occasion</span><span>Anniversary 2026</span></div>
+        <div class="detail"><span>Where bought</span><span>Amazon</span></div>
+        <div class="detail"><span>Expected arrival</span><span>April 5</span></div>
+      </div>
+
+      <div class="status-strip">
+        <div class="status-box">
+          <strong>Current status</strong>
+          <span>On the way</span>
+        </div>
+        <div class="status-box">
+          <strong>Next step</strong>
+          <span>Mark it arrived when it gets there</span>
+        </div>
+      </div>
+
+      <button class="cta">Mark as Arrived</button>
+      <button class="secondary">Open Tracking Link</button>
+    </div>
+  </section>
+
+  <section class="screen" id="add">
+    <div class="panel hero">
+      <div class="eyebrow">Add a Gift</div>
+      <h2>Keep this simple.</h2>
+      <div class="body sans">Start with the basics. Extra details can wait.</div>
+    </div>
+
+    <div class="panel">
+      <div class="form-field">
+        <label>Who is this gift for?</label>
+        <select>
+          <option selected>Marcus</option>
+          <option>Sarah</option>
+          <option>Mom</option>
+          <option>Dad</option>
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label>What is the gift?</label>
+        <input type="text" value="Ember Mug">
+      </div>
+
+      <div class="form-field">
+        <label>Where did you buy it?</label>
+        <select>
+          <option selected>Amazon</option>
+          <option>Etsy</option>
+          <option>Target</option>
+          <option>Other</option>
+        </select>
+      </div>
+
+      <div class="more sans">More details</div>
+
+      <div class="form-field">
+        <label>Occasion</label>
+        <select>
+          <option selected>Birthday on April 20</option>
+          <option>Christmas 2026</option>
+          <option>Just because</option>
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label>Notes</label>
+        <textarea>He brought this up in March.</textarea>
+      </div>
+
+      <button class="cta">Save Gift</button>
+    </div>
+  </section>
+</main>
+
+<nav class="footer-nav">
+  <button class="navbtn active" id="nav-today" onclick="showScreen('today')">Today</button>
+  <button class="navbtn" id="nav-people" onclick="showScreen('people')">People</button>
+  <button class="navbtn" id="nav-packages" onclick="showScreen('packages')">Packages</button>
+</nav>
+
+<script>
+  const map = {
+    today: ["Today", "One clear next step, then everything else."],
+    people: ["People", "See who is coming up next."],
+    packages: ["Packages", "What is on the way right now."],
+    person: ["Marcus", "Everything important for one person in one place."],
+    gift: ["Gift Detail", "What this gift is, who it is for, and what happens next."],
+    add: ["Add a Gift", "Only the fields you need first."]
+  };
+
+  function showScreen(id) {
+    document.querySelectorAll(".screen").forEach(el => el.classList.remove("active"));
+    document.getElementById(id).classList.add("active");
+    document.getElementById("pageTitle").textContent = map[id][0];
+    document.getElementById("pageSubtitle").textContent = map[id][1];
+
+    document.querySelectorAll(".navbtn").forEach(el => el.classList.remove("active"));
+    if (id === "today" || id === "person" || id === "gift" || id === "add") {
+      document.getElementById("nav-today").classList.add("active");
+    } else if (id === "people") {
+      document.getElementById("nav-people").classList.add("active");
+    } else if (id === "packages") {
+      document.getElementById("nav-packages").classList.add("active");
+    }
+  }
+
+  document.getElementById("todayDate").textContent = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric"
+  });
+</script>
+</body>
+</html>

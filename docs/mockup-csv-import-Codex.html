@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gift Tracker — Codex Import Mockup</title>
+<style>
+  :root {
+    --bg: #f5f6f4;
+    --card: #fff;
+    --ink: #1a221e;
+    --muted: #68716c;
+    --line: #d9dfdb;
+    --green: #30594b;
+    --green-soft: #e7efe9;
+    --amber: #9b651c;
+    --amber-soft: #fff3e0;
+    --radius: 16px;
+    --shadow: 0 4px 18px rgba(20, 29, 25, 0.07);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    max-width: 430px;
+    margin: 0 auto;
+    min-height: 100vh;
+    background: linear-gradient(180deg, #eef2ee 0%, var(--bg) 100%);
+    font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+  }
+  .banner {
+    background: #f7e2b7;
+    color: #6f4d10;
+    text-align: center;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .header {
+    padding: 18px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(245, 246, 244, 0.96);
+    position: sticky;
+    top: 0;
+  }
+  .eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 800; }
+  .title { margin-top: 6px; font-size: 28px; font-weight: 800; }
+  .subtitle { margin-top: 6px; color: var(--muted); font-size: 15px; line-height: 1.45; }
+  .screen { padding: 18px; }
+  .section { margin: 18px 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 800; }
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .drop {
+    border: 2px dashed #bed0c6;
+    background: var(--green-soft);
+    border-radius: 16px;
+    padding: 28px 18px;
+    text-align: center;
+  }
+  .drop strong { display: block; font-size: 19px; color: var(--green); }
+  .drop span { display: block; margin-top: 6px; color: var(--muted); font-size: 14px; }
+  .statgrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .stat {
+    background: #f7faf7;
+    border: 1px solid #dfe8e2;
+    border-radius: 14px;
+    padding: 14px;
+    text-align: center;
+  }
+  .stat strong { display: block; font-size: 28px; color: var(--green); }
+  .stat span { display: block; margin-top: 4px; color: var(--muted); font-size: 13px; font-weight: 700; }
+  .row {
+    padding: 14px 0;
+    border-bottom: 1px solid #edf1ee;
+  }
+  .row:last-child { border-bottom: none; }
+  .title2 { font-size: 17px; font-weight: 700; }
+  .meta { margin-top: 4px; color: var(--muted); font-size: 14px; line-height: 1.4; }
+  .tag {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: var(--amber-soft);
+    color: var(--amber);
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .btnrow { display: flex; gap: 8px; margin-top: 10px; }
+  .btn {
+    flex: 1;
+    min-height: 46px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 800;
+    border: none;
+  }
+  .btn.primary { background: var(--green); color: white; }
+  .btn.secondary { background: white; color: var(--green); border: 2px solid var(--green); }
+</style>
+</head>
+<body>
+<div class="banner">UI MOCKUP — Codex Admin Redesign</div>
+
+<header class="header">
+  <div class="eyebrow">Admin</div>
+  <div class="title">Import Review</div>
+  <div class="subtitle">This is a future-phase admin tool. Keep the flow simple: parse, review exceptions, confirm.</div>
+</header>
+
+<main class="screen">
+  <div class="section">Upload</div>
+  <div class="panel">
+    <div class="drop">
+      <strong>Choose an Amazon CSV</strong>
+      <span>Use this for reconciliation, not daily tracking.</span>
+    </div>
+  </div>
+
+  <div class="section">Parse Summary</div>
+  <div class="panel">
+    <div class="statgrid">
+      <div class="stat"><strong>18</strong><span>Total rows</span></div>
+      <div class="stat"><strong>12</strong><span>Matched cleanly</span></div>
+      <div class="stat"><strong>3</strong><span>Need review</span></div>
+      <div class="stat"><strong>3</strong><span>Duplicates</span></div>
+    </div>
+  </div>
+
+  <div class="section">Only Review Exceptions</div>
+  <div class="panel">
+    <div class="row">
+      <div class="title2">Kindle Paperwhite</div>
+      <div class="meta">Order #111-3847291-8483721 · March 15 · Candidate: Marcus</div>
+      <div class="tag">Needs decision</div>
+      <div class="btnrow">
+        <button class="btn primary">Assign to Marcus</button>
+        <button class="btn secondary">Pick Someone Else</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="title2">Hydro Flask 32 oz</div>
+      <div class="meta">Order #111-5738192-4829301 · Feb 28 · No person matched</div>
+      <div class="tag">Unmatched</div>
+      <div class="btnrow">
+        <button class="btn primary">Create New Person</button>
+        <button class="btn secondary">Skip for Now</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">Principle</div>
+  <div class="panel">
+    <div class="meta" style="margin-top:0;">
+      The import should not be the heart of the product. It should be an admin reconciliation tool that only asks for attention when the system is uncertain.
+    </div>
+  </div>
+</main>
+</body>
+</html>

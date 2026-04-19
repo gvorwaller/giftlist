@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gift Tracker — UI Mockup</title>
+<style>
+  :root {
+    --primary: #2E6B4F;
+    --primary-light: #E8F5EE;
+    --accent: #D4763A;
+    --danger: #C0392B;
+    --text: #1A1A1A;
+    --text-muted: #4A4A4A;
+    --bg: #FAFAF8;
+    --card: #FFFFFF;
+    --border: #D6D6D6;
+    --badge-idea: #8E7CC3;
+    --badge-planned: #3498DB;
+    --badge-ordered: #E67E22;
+    --badge-shipped: #2ECC71;
+    --badge-delivered: #27AE60;
+    --badge-wrapped: #9B59B6;
+    --badge-given: #2E6B4F;
+    --badge-none: #C0392B;
+    --radius: 12px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-size: 18px;
+    line-height: 1.5;
+    color: var(--text);
+    background: var(--bg);
+    max-width: 430px;
+    margin: 0 auto;
+    min-height: 100vh;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* ── Persistent Header ── */
+  .app-header {
+    background: var(--primary);
+    color: white;
+    padding: 16px 20px 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .app-header .date-line {
+    font-size: 14px;
+    opacity: 0.85;
+    margin-bottom: 2px;
+  }
+  .app-header .page-title {
+    font-size: 22px;
+    font-weight: 700;
+  }
+  .app-header .nav-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .nav-btn {
+    background: rgba(255,255,255,0.18);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    min-height: 44px;
+    min-width: 44px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .nav-btn.active {
+    background: rgba(255,255,255,0.95);
+    color: var(--primary);
+  }
+  .nav-btn:hover { background: rgba(255,255,255,0.3); }
+  .nav-btn.active:hover { background: rgba(255,255,255,0.95); }
+
+  /* ── Screen Container ── */
+  .screen { display: none; padding: 16px 16px 100px; }
+  .screen.active { display: block; }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .card-title {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--primary);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-title .icon { font-size: 20px; }
+
+  /* ── Status Badges ── */
+  .badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+    color: white;
+    white-space: nowrap;
+  }
+  .badge-idea      { background: var(--badge-idea); }
+  .badge-planned   { background: var(--badge-planned); }
+  .badge-ordered   { background: var(--badge-ordered); }
+  .badge-shipped   { background: var(--badge-shipped); }
+  .badge-delivered  { background: var(--badge-delivered); }
+  .badge-wrapped   { background: var(--badge-wrapped); }
+  .badge-given     { background: var(--badge-given); }
+  .badge-none      { background: var(--badge-none); }
+
+  /* ── Occasion Rows ── */
+  .occasion-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid #ECECEC;
+    gap: 10px;
+  }
+  .occasion-row:last-child { border-bottom: none; }
+  .occasion-info { flex: 1; }
+  .occasion-name { font-size: 18px; font-weight: 600; }
+  .occasion-detail { font-size: 15px; color: var(--text-muted); margin-top: 2px; }
+
+  /* ── Attention Items ── */
+  .attention-item {
+    background: #FFF8F0;
+    border-left: 4px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    font-size: 17px;
+    line-height: 1.4;
+  }
+
+  /* ── Shipment Cards ── */
+  .shipment-row {
+    padding: 12px 0;
+    border-bottom: 1px solid #ECECEC;
+  }
+  .shipment-row:last-child { border-bottom: none; }
+  .shipment-item { font-size: 17px; font-weight: 600; }
+  .shipment-detail { font-size: 15px; color: var(--text-muted); margin-top: 3px; }
+
+  /* ── Big Action Buttons ── */
+  .action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 16px;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 18px;
+    font-weight: 600;
+    cursor: pointer;
+    min-height: 56px;
+    margin-bottom: 10px;
+  }
+  .action-btn.primary {
+    background: var(--primary);
+    color: white;
+  }
+  .action-btn.secondary {
+    background: white;
+    color: var(--primary);
+    border: 2px solid var(--primary);
+  }
+  .action-btn:active { transform: scale(0.98); }
+
+  /* ── Recipient List ── */
+  .recipient-item {
+    display: flex;
+    align-items: center;
+    padding: 14px 0;
+    border-bottom: 1px solid #ECECEC;
+    cursor: pointer;
+    gap: 14px;
+  }
+  .recipient-item:last-child { border-bottom: none; }
+  .recipient-avatar {
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    background: var(--primary-light);
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .recipient-name { font-size: 18px; font-weight: 600; }
+  .recipient-rel { font-size: 14px; color: var(--text-muted); }
+  .recipient-arrow {
+    margin-left: auto;
+    font-size: 20px;
+    color: #BBB;
+  }
+
+  /* ── Gift Detail ── */
+  .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid #F0F0F0;
+    font-size: 17px;
+  }
+  .detail-row:last-child { border-bottom: none; }
+  .detail-label { color: var(--text-muted); font-weight: 500; }
+  .detail-value { font-weight: 600; text-align: right; max-width: 60%; }
+
+  .status-flow {
+    display: flex;
+    gap: 4px;
+    margin: 16px 0;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .status-step {
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    background: #F0F0F0;
+    color: #999;
+    text-align: center;
+  }
+  .status-step.done {
+    background: var(--primary-light);
+    color: var(--primary);
+  }
+  .status-step.current {
+    background: var(--primary);
+    color: white;
+  }
+  .status-arrow { color: #CCC; display: flex; align-items: center; font-size: 14px; }
+
+  /* ── Wish List ── */
+  .wish-item {
+    padding: 14px 0;
+    border-bottom: 1px solid #ECECEC;
+  }
+  .wish-item:last-child { border-bottom: none; }
+  .wish-desc { font-size: 17px; font-weight: 600; }
+  .wish-note { font-size: 14px; color: var(--text-muted); margin-top: 3px; }
+  .wish-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .wish-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    min-height: 44px;
+  }
+  .wish-btn.order { background: var(--primary); color: white; }
+  .wish-btn.remove { background: #F0F0F0; color: var(--text-muted); }
+
+  /* ── Calendar ── */
+  .cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+    margin-top: 8px;
+  }
+  .cal-header {
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+    padding: 8px 0;
+    color: var(--text-muted);
+  }
+  .cal-day {
+    aspect-ratio: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 500;
+    position: relative;
+    cursor: pointer;
+    min-height: 44px;
+  }
+  .cal-day.empty { cursor: default; }
+  .cal-day.today {
+    background: var(--primary-light);
+    font-weight: 700;
+  }
+  .cal-day.event::after {
+    content: '';
+    width: 8px; height: 8px;
+    background: var(--accent);
+    border-radius: 50%;
+    position: absolute;
+    bottom: 4px;
+  }
+  .cal-day.event-green::after { background: var(--badge-given); }
+
+  /* ── Search Bar ── */
+  .search-bar {
+    width: 100%;
+    padding: 14px 16px;
+    font-size: 17px;
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    background: white;
+    margin-bottom: 14px;
+    min-height: 48px;
+  }
+  .search-bar:focus { outline: none; border-color: var(--primary); }
+
+  /* ── Confirmation Dialog ── */
+  .dialog-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .dialog-overlay.show { display: flex; }
+  .dialog-box {
+    background: white;
+    border-radius: 16px;
+    padding: 28px 24px;
+    max-width: 360px;
+    width: 100%;
+    text-align: center;
+  }
+  .dialog-text {
+    font-size: 19px;
+    margin-bottom: 20px;
+    line-height: 1.4;
+  }
+  .dialog-btns { display: flex; gap: 10px; }
+  .dialog-btns button {
+    flex: 1;
+    padding: 14px;
+    border-radius: 10px;
+    font-size: 17px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    min-height: 52px;
+  }
+  .dialog-yes { background: var(--primary); color: white; }
+  .dialog-no { background: #F0F0F0; color: var(--text); }
+
+  /* ── Recently Viewed ── */
+  .recent-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 8px 14px;
+    font-size: 15px;
+    cursor: pointer;
+    margin: 0 6px 6px 0;
+  }
+
+  /* ── Mockup Banner ── */
+  .mockup-banner {
+    background: #FFF3CD;
+    border-bottom: 1px solid #FFECB5;
+    padding: 8px 16px;
+    text-align: center;
+    font-size: 13px;
+    color: #856404;
+    font-weight: 600;
+  }
+
+  /* ── Section Labels ── */
+  .section-label {
+    font-size: 14px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin: 20px 0 8px;
+  }
+</style>
+</head>
+<body>
+
+<div class="mockup-banner">UI MOCKUP — Gift Tracker v0.1</div>
+
+<!-- ═══ HEADER ═══ -->
+<header class="app-header">
+  <div class="date-line" id="todayDate"></div>
+  <div class="page-title" id="pageTitle">Home</div>
+  <nav class="nav-row">
+    <button class="nav-btn active" onclick="showScreen('dashboard')" id="nav-dashboard">🏠 Home</button>
+    <button class="nav-btn" onclick="showScreen('people')" id="nav-people">👤 People</button>
+    <button class="nav-btn" onclick="showScreen('calendar')" id="nav-calendar">📅 Calendar</button>
+    <button class="nav-btn" onclick="showScreen('admin')" id="nav-admin">⚙️ Admin</button>
+  </nav>
+</header>
+
+<!-- ═══ DASHBOARD ═══ -->
+<div class="screen active" id="screen-dashboard">
+
+  <div class="section-label">Recently Viewed</div>
+  <div style="margin-bottom: 14px;">
+    <span class="recent-chip" onclick="showScreen('recipient-detail')">👤 Marcus</span>
+    <span class="recent-chip" onclick="showScreen('gift-detail')">🎁 AirPods Max</span>
+    <span class="recent-chip" onclick="showScreen('people')">📋 People list</span>
+  </div>
+
+  <!-- Upcoming Occasions -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🎂</span> Upcoming Occasions</div>
+    <div class="occasion-row" onclick="showScreen('recipient-detail')" style="cursor:pointer">
+      <div class="occasion-info">
+        <div class="occasion-name">Marcus — Birthday</div>
+        <div class="occasion-detail">April 20, 2026 · 19 days away</div>
+      </div>
+      <span class="badge badge-idea">Idea</span>
+    </div>
+    <div class="occasion-row">
+      <div class="occasion-info">
+        <div class="occasion-name">Sarah — Anniversary</div>
+        <div class="occasion-detail">April 28, 2026 · 27 days away</div>
+      </div>
+      <span class="badge badge-ordered">Ordered</span>
+    </div>
+    <div class="occasion-row">
+      <div class="occasion-info">
+        <div class="occasion-name">Mom — Mother's Day</div>
+        <div class="occasion-detail">May 10, 2026 · 39 days away</div>
+      </div>
+      <span class="badge badge-none">Needs Gift</span>
+    </div>
+  </div>
+
+  <!-- Needs Attention -->
+  <div class="card">
+    <div class="card-title"><span class="icon">⚡</span> Needs Attention</div>
+    <div class="attention-item">
+      Marcus's birthday is in 19 days. You have an idea saved — want to order it?
+      <div style="margin-top: 4px; font-size: 14px; color: var(--badge-idea);">3 ideas saved</div>
+    </div>
+    <div class="attention-item">
+      Mom's Mother's Day is in 39 days. You haven't started looking yet. Want to add a gift?
+    </div>
+  </div>
+
+  <!-- Active Shipments -->
+  <div class="card">
+    <div class="card-title"><span class="icon">📦</span> Active Shipments</div>
+    <div class="shipment-row" onclick="showScreen('gift-detail')" style="cursor:pointer">
+      <div class="shipment-item">AirPods Max — for Sarah</div>
+      <div class="shipment-detail">Amazon · Shipped via UPS</div>
+      <div class="shipment-detail" style="color: var(--badge-shipped); font-weight:600;">Arriving April 5</div>
+    </div>
+    <div class="shipment-row">
+      <div class="shipment-item">Cookbook — for Dad</div>
+      <div class="shipment-detail">Amazon · Ordered March 30</div>
+      <div class="shipment-detail" style="color: var(--badge-ordered); font-weight:600;">Processing</div>
+    </div>
+  </div>
+
+  <!-- Quick Actions -->
+  <button class="action-btn primary" onclick="showScreen('add-gift')">🎁 Add a Gift</button>
+  <button class="action-btn secondary">🔍 Search Gifts & People</button>
+</div>
+
+<!-- ═══ PEOPLE LIST ═══ -->
+<div class="screen" id="screen-people">
+  <input type="text" class="search-bar" placeholder="Search by name or relationship…">
+
+  <div class="card">
+    <div class="recipient-item" onclick="showScreen('recipient-detail')">
+      <div class="recipient-avatar">M</div>
+      <div>
+        <div class="recipient-name">Marcus</div>
+        <div class="recipient-rel">Son</div>
+      </div>
+      <div class="recipient-arrow">›</div>
+    </div>
+    <div class="recipient-item">
+      <div class="recipient-avatar">S</div>
+      <div>
+        <div class="recipient-name">Sarah</div>
+        <div class="recipient-rel">Daughter-in-law</div>
+      </div>
+      <div class="recipient-arrow">›</div>
+    </div>
+    <div class="recipient-item">
+      <div class="recipient-avatar">M</div>
+      <div>
+        <div class="recipient-name">Mom</div>
+        <div class="recipient-rel">Mother</div>
+      </div>
+      <div class="recipient-arrow">›</div>
+    </div>
+    <div class="recipient-item">
+      <div class="recipient-avatar">D</div>
+      <div>
+        <div class="recipient-name">Dad</div>
+        <div class="recipient-rel">Father</div>
+      </div>
+      <div class="recipient-arrow">›</div>
+    </div>
+    <div class="recipient-item">
+      <div class="recipient-avatar">J</div>
+      <div>
+        <div class="recipient-name">Jake</div>
+        <div class="recipient-rel">Nephew</div>
+      </div>
+      <div class="recipient-arrow">›</div>
+    </div>
+    <div class="recipient-item">
+      <div class="recipient-avatar">L</div>
+      <div>
+        <div class="recipient-name">Lisa</div>
+        <div class="recipient-rel">Friend</div>
+      </div>
+      <div class="recipient-arrow">›</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ RECIPIENT DETAIL ═══ -->
+<div class="screen" id="screen-recipient-detail">
+  <div class="card">
+    <div style="display:flex; align-items:center; gap:14px; margin-bottom:12px;">
+      <div class="recipient-avatar" style="width:56px;height:56px;font-size:24px;">M</div>
+      <div>
+        <div style="font-size:22px; font-weight:700;">Marcus</div>
+        <div style="font-size:15px; color:var(--text-muted);">Son · Prefers experience gifts</div>
+      </div>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Next occasion</span>
+      <span class="detail-value">Birthday — April 20</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Address</span>
+      <span class="detail-value">123 Oak St, Austin TX</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Notes</span>
+      <span class="detail-value">Loves hiking, coffee, vinyl records</span>
+    </div>
+  </div>
+
+  <!-- Tab Buttons -->
+  <div style="display:flex; gap:8px; margin-bottom:14px;">
+    <button class="nav-btn active" style="flex:1; background:var(--primary); color:white; justify-content:center;" onclick="toggleTab('history')">Gift History</button>
+    <button class="nav-btn" style="flex:1; background:rgba(0,0,0,0.06); color:var(--text); justify-content:center;" id="ideas-tab-btn" onclick="toggleTab('ideas')">Ideas (3)</button>
+  </div>
+
+  <!-- Gift History -->
+  <div id="tab-history">
+    <div class="section-label">Birthday 2026</div>
+    <div class="card" style="cursor:pointer">
+      <div style="font-size:17px; font-weight:600;">No gift ordered yet</div>
+      <div style="font-size:15px; color:var(--text-muted); margin-top:4px;">3 ideas saved — tap Ideas tab to review</div>
+    </div>
+
+    <div class="section-label">Christmas 2025</div>
+    <div class="card" onclick="showScreen('gift-detail')" style="cursor:pointer">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div style="font-size:17px; font-weight:600;">Patagonia Fleece Jacket</div>
+          <div style="font-size:15px; color:var(--text-muted);">Amazon · $149.00</div>
+        </div>
+        <span class="badge badge-given">Given</span>
+      </div>
+    </div>
+
+    <div class="section-label">Birthday 2025</div>
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div style="font-size:17px; font-weight:600;">Concert Tickets — Khruangbin</div>
+          <div style="font-size:15px; color:var(--text-muted);">Ticketmaster · $180.00</div>
+        </div>
+        <span class="badge badge-given">Given</span>
+      </div>
+      <div style="font-size:14px; color:var(--text-muted); margin-top:6px;">He loved this!</div>
+    </div>
+  </div>
+
+  <!-- Ideas / Wish List Tab -->
+  <div id="tab-ideas" style="display:none;">
+    <div class="card">
+      <div class="card-title"><span class="icon">💡</span> Gift Ideas for Marcus</div>
+      <div class="wish-item">
+        <div class="wish-desc">Ember Temperature Control Mug</div>
+        <div class="wish-note">He mentioned wanting one · ~$130</div>
+        <div class="wish-actions">
+          <button class="wish-btn order" onclick="showDialog('Mark as Planned and start shopping for Ember Mug?')">Order This</button>
+          <button class="wish-btn remove">Remove</button>
+        </div>
+      </div>
+      <div class="wish-item">
+        <div class="wish-desc">REI Day Hike Backpack</div>
+        <div class="wish-note">From his wish list · ~$90</div>
+        <div style="display:inline-block; margin-top:4px; font-size:12px; padding:2px 8px; background:#F0ECF8; color:var(--badge-idea); border-radius:10px; font-weight:600;">From Wish List</div>
+        <div class="wish-actions">
+          <button class="wish-btn order" onclick="showDialog('Mark as Planned and start shopping for REI Backpack?')">Order This</button>
+          <button class="wish-btn remove">Remove</button>
+        </div>
+      </div>
+      <div class="wish-item">
+        <div class="wish-desc">Vinyl: Khruangbin — A La Sala</div>
+        <div class="wish-note">Follows up on last year's concert tickets</div>
+        <div class="wish-actions">
+          <button class="wish-btn order" onclick="showDialog('Mark as Planned and start shopping for this vinyl?')">Order This</button>
+          <button class="wish-btn remove">Remove</button>
+        </div>
+      </div>
+    </div>
+
+    <button class="action-btn primary">💡 Add an Idea</button>
+    <button class="action-btn secondary">📄 Import Wish List File</button>
+  </div>
+
+  <button class="action-btn primary" style="margin-top:8px;" onclick="showScreen('add-gift')">🎁 Add Gift for Marcus</button>
+</div>
+
+<!-- ═══ GIFT DETAIL ═══ -->
+<div class="screen" id="screen-gift-detail">
+  <div class="card">
+    <div style="font-size:20px; font-weight:700; margin-bottom:4px;">AirPods Max</div>
+    <div style="font-size:16px; color:var(--text-muted); margin-bottom:12px;">For Sarah · Anniversary 2026</div>
+
+    <div class="status-flow">
+      <div class="status-step done">Idea</div>
+      <div class="status-arrow">→</div>
+      <div class="status-step done">Planned</div>
+      <div class="status-arrow">→</div>
+      <div class="status-step done">Ordered</div>
+      <div class="status-arrow">→</div>
+      <div class="status-step current">Shipped</div>
+      <div class="status-arrow">→</div>
+      <div class="status-step">Delivered</div>
+      <div class="status-arrow">→</div>
+      <div class="status-step">Wrapped</div>
+      <div class="status-arrow">→</div>
+      <div class="status-step">Given</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="detail-row">
+      <span class="detail-label">Source</span>
+      <span class="detail-value">Amazon</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Order ID</span>
+      <span class="detail-value" style="font-size:14px;">111-7284938-2948371</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Price</span>
+      <span class="detail-value">$549.00</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">You ordered on</span>
+      <span class="detail-value">March 28, 2026</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Shipped on</span>
+      <span class="detail-value">March 30, 2026</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Carrier</span>
+      <span class="detail-value">UPS</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Arriving</span>
+      <span class="detail-value" style="color: var(--badge-shipped);">April 5, 2026</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Tracking</span>
+      <span class="detail-value" style="color:var(--primary); text-decoration:underline; cursor:pointer;">1Z999AA10123456784</span>
+    </div>
+  </div>
+
+  <button class="action-btn primary" onclick="showDialog('Mark AirPods Max as Delivered?')">📦 Mark as Delivered</button>
+  <button class="action-btn secondary">✏️ Edit Gift Details</button>
+</div>
+
+<!-- ═══ ADD GIFT ═══ -->
+<div class="screen" id="screen-add-gift">
+  <div class="card">
+    <div class="card-title">🎁 Add a Gift</div>
+
+    <div style="margin-bottom:16px;">
+      <label style="font-size:15px; font-weight:600; display:block; margin-bottom:6px;">Who is this gift for?</label>
+      <select style="width:100%; padding:14px; font-size:17px; border:2px solid var(--border); border-radius:10px; min-height:48px; background:white;">
+        <option>Marcus (son)</option>
+        <option>Sarah (daughter-in-law)</option>
+        <option>Mom (mother)</option>
+        <option>Dad (father)</option>
+        <option>Jake (nephew)</option>
+        <option>Lisa (friend)</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <label style="font-size:15px; font-weight:600; display:block; margin-bottom:6px;">What occasion?</label>
+      <select style="width:100%; padding:14px; font-size:17px; border:2px solid var(--border); border-radius:10px; min-height:48px; background:white;">
+        <option>Birthday — April 20</option>
+        <option>Christmas 2026</option>
+        <option>Just because (no occasion)</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <label style="font-size:15px; font-weight:600; display:block; margin-bottom:6px;">What did you get?</label>
+      <input type="text" placeholder="Gift description" style="width:100%; padding:14px; font-size:17px; border:2px solid var(--border); border-radius:10px; min-height:48px;">
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <label style="font-size:15px; font-weight:600; display:block; margin-bottom:6px;">Where did you buy it?</label>
+      <select style="width:100%; padding:14px; font-size:17px; border:2px solid var(--border); border-radius:10px; min-height:48px; background:white;">
+        <option>Amazon</option>
+        <option>Etsy</option>
+        <option>Target</option>
+        <option>Other</option>
+        <option>Homemade</option>
+      </select>
+    </div>
+
+    <!-- Collapsible More Details -->
+    <button onclick="document.getElementById('more-details').style.display = document.getElementById('more-details').style.display === 'none' ? 'block' : 'none'" style="background:none; border:none; color:var(--primary); font-size:16px; font-weight:600; cursor:pointer; padding:8px 0; min-height:44px;">
+      ▸ More Details (price, tracking, notes)
+    </button>
+    <div id="more-details" style="display:none; margin-top:12px;">
+      <div style="margin-bottom:16px;">
+        <label style="font-size:15px; font-weight:600; display:block; margin-bottom:6px;">Price</label>
+        <input type="text" placeholder="$0.00" style="width:100%; padding:14px; font-size:17px; border:2px solid var(--border); border-radius:10px; min-height:48px;">
+      </div>
+      <div style="margin-bottom:16px;">
+        <label style="font-size:15px; font-weight:600; display:block; margin-bottom:6px;">Product link</label>
+        <input type="url" placeholder="https://..." style="width:100%; padding:14px; font-size:17px; border:2px solid var(--border); border-radius:10px; min-height:48px;">
+      </div>
+      <div style="margin-bottom:16px;">
+        <label style="font-size:15px; font-weight:600; display:block; margin-bottom:6px;">Tracking number</label>
+        <input type="text" placeholder="Optional" style="width:100%; padding:14px; font-size:17px; border:2px solid var(--border); border-radius:10px; min-height:48px;">
+      </div>
+      <div style="margin-bottom:16px;">
+        <label style="font-size:15px; font-weight:600; display:block; margin-bottom:6px;">Notes</label>
+        <textarea placeholder="Sizes, preferences, reminders…" rows="3" style="width:100%; padding:14px; font-size:17px; border:2px solid var(--border); border-radius:10px;"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <button class="action-btn primary" onclick="showDialog('Save this gift for Marcus?')">Save Gift</button>
+  <button class="action-btn secondary" onclick="showScreen('dashboard')">Cancel</button>
+</div>
+
+<!-- ═══ CALENDAR ═══ -->
+<div class="screen" id="screen-calendar">
+  <div class="card">
+    <div class="card-title" style="justify-content:center; font-size:20px;">April 2026</div>
+    <div class="cal-grid">
+      <div class="cal-header">Sun</div><div class="cal-header">Mon</div><div class="cal-header">Tue</div>
+      <div class="cal-header">Wed</div><div class="cal-header">Thu</div><div class="cal-header">Fri</div><div class="cal-header">Sat</div>
+      <div class="cal-day empty"></div><div class="cal-day empty"></div><div class="cal-day empty"></div>
+      <div class="cal-day today">1</div><div class="cal-day">2</div><div class="cal-day">3</div><div class="cal-day">4</div>
+      <div class="cal-day event">5</div><div class="cal-day">6</div><div class="cal-day">7</div>
+      <div class="cal-day">8</div><div class="cal-day">9</div><div class="cal-day">10</div><div class="cal-day">11</div>
+      <div class="cal-day">12</div><div class="cal-day">13</div><div class="cal-day">14</div>
+      <div class="cal-day">15</div><div class="cal-day">16</div><div class="cal-day">17</div><div class="cal-day">18</div>
+      <div class="cal-day">19</div><div class="cal-day event">20</div><div class="cal-day">21</div>
+      <div class="cal-day">22</div><div class="cal-day">23</div><div class="cal-day">24</div><div class="cal-day">25</div>
+      <div class="cal-day">26</div><div class="cal-day">27</div><div class="cal-day event">28</div>
+      <div class="cal-day">29</div><div class="cal-day">30</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Events This Month</div>
+    <div class="occasion-row">
+      <div class="occasion-info">
+        <div class="occasion-name">April 5 — Sarah's AirPods arrive</div>
+        <div class="occasion-detail">UPS delivery expected</div>
+      </div>
+      <span class="badge badge-shipped">Shipped</span>
+    </div>
+    <div class="occasion-row">
+      <div class="occasion-info">
+        <div class="occasion-name">April 20 — Marcus's Birthday</div>
+        <div class="occasion-detail">3 ideas saved, nothing ordered</div>
+      </div>
+      <span class="badge badge-idea">Idea</span>
+    </div>
+    <div class="occasion-row">
+      <div class="occasion-info">
+        <div class="occasion-name">April 28 — Sarah & Marcus Anniversary</div>
+        <div class="occasion-detail">AirPods Max ordered</div>
+      </div>
+      <span class="badge badge-shipped">Shipped</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ADMIN ═══ -->
+<div class="screen" id="screen-admin">
+  <div class="card">
+    <div class="card-title"><span class="icon">📤</span> Amazon CSV Import</div>
+    <p style="font-size:16px; color:var(--text-muted); margin-bottom:14px;">Upload your Amazon order history to automatically import gifts.</p>
+    <button class="action-btn primary">Upload CSV File</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="icon">👥</span> Manage Recipients</div>
+    <p style="font-size:16px; color:var(--text-muted); margin-bottom:14px;">Add, edit, or merge recipients. Manage name aliases for imports.</p>
+    <button class="action-btn secondary">Open Recipient Manager</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="icon">🔔</span> Notifications</div>
+    <div class="detail-row">
+      <span class="detail-label">Email</span>
+      <span class="detail-value" style="color:var(--badge-delivered);">Active</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Telegram</span>
+      <span class="detail-value" style="color:var(--badge-delivered);">Active</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Weekly digest</span>
+      <span class="detail-value">Sundays at 6 PM</span>
+    </div>
+    <button class="action-btn secondary" style="margin-top:12px;">Edit Notification Settings</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="icon">📋</span> Activity Log</div>
+    <div style="font-size:15px; line-height:1.8; color:var(--text-muted);">
+      <div><strong>Today 3:22 PM</strong> — Gift added: Cookbook for Dad</div>
+      <div><strong>Today 10:15 AM</strong> — Status changed: AirPods Max → Shipped</div>
+      <div><strong>Yesterday</strong> — Idea saved: Ember Mug for Marcus</div>
+      <div><strong>Mar 28</strong> — Gift ordered: AirPods Max for Sarah (Amazon)</div>
+      <div><strong>Mar 25</strong> — CSV imported: 12 rows, 8 new gifts, 4 skipped</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="icon">💾</span> Backup Status</div>
+    <div class="detail-row">
+      <span class="detail-label">Last backup</span>
+      <span class="detail-value" style="color:var(--badge-delivered);">Today 3:00 AM</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">DO Spaces</span>
+      <span class="detail-value">30 daily snapshots</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">M2 rsync</span>
+      <span class="detail-value" style="color:var(--badge-delivered);">Synced</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ CONFIRMATION DIALOG ═══ -->
+<div class="dialog-overlay" id="confirmDialog">
+  <div class="dialog-box">
+    <div class="dialog-text" id="dialogText">Are you sure?</div>
+    <div class="dialog-btns">
+      <button class="dialog-no" onclick="hideDialog()">No, go back</button>
+      <button class="dialog-yes" onclick="hideDialog()">Yes</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Set today's date in natural language
+  const opts = { weekday:'long', year:'numeric', month:'long', day:'numeric' };
+  document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-US', opts);
+
+  const titles = {
+    'dashboard': 'Home',
+    'people': 'People',
+    'calendar': 'April 2026',
+    'admin': 'Admin',
+    'recipient-detail': 'Marcus',
+    'gift-detail': 'Gift Detail',
+    'add-gift': 'Add a Gift'
+  };
+
+  function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById('screen-' + id).classList.add('active');
+    document.getElementById('pageTitle').textContent = titles[id] || 'Gift Tracker';
+
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    const navBtn = document.getElementById('nav-' + id);
+    if (navBtn) navBtn.classList.add('active');
+  }
+
+  function toggleTab(tab) {
+    const historyEl = document.getElementById('tab-history');
+    const ideasEl = document.getElementById('tab-ideas');
+    const ideasBtn = document.getElementById('ideas-tab-btn');
+
+    if (tab === 'ideas') {
+      historyEl.style.display = 'none';
+      ideasEl.style.display = 'block';
+      ideasBtn.style.background = 'var(--primary)';
+      ideasBtn.style.color = 'white';
+      ideasBtn.previousElementSibling.style.background = 'rgba(0,0,0,0.06)';
+      ideasBtn.previousElementSibling.style.color = 'var(--text)';
+    } else {
+      historyEl.style.display = 'block';
+      ideasEl.style.display = 'none';
+      ideasBtn.style.background = 'rgba(0,0,0,0.06)';
+      ideasBtn.style.color = 'var(--text)';
+      ideasBtn.previousElementSibling.style.background = 'var(--primary)';
+      ideasBtn.previousElementSibling.style.color = 'white';
+    }
+  }
+
+  function showDialog(text) {
+    document.getElementById('dialogText').textContent = text;
+    document.getElementById('confirmDialog').classList.add('show');
+  }
+
+  function hideDialog() {
+    document.getElementById('confirmDialog').classList.remove('show');
+  }
+</script>
+</body>
+</html>
