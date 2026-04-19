@@ -23,7 +23,7 @@ Implementation follows the 6-phase plan in `docs/gift-tracker-implementation-pla
 ## Commands
 
 ```bash
-# Dev server — runs on port 5174 (5173 is BTC Dashboard, 3000 is gaylonphotos)
+# Dev server — runs on port 5175 (5173 is BTC Dashboard, 5174 already taken, 3000 is gaylonphotos)
 npm run dev
 
 # Production build

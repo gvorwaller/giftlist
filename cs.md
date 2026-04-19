@@ -114,7 +114,7 @@ Admin can override, but manager view enforces forward progression only.
 ---
 
 ## Development Workflow
-- **Dev server port**: 5174 (5173 is BTC Dashboard)
+- **Dev server port**: 5175 (5173 is BTC Dashboard, 5174 was already in use on this box)
 - **Always `cd` back** to project root after operations
 - **Use absolute paths** when possible to avoid directory confusion
 - **Commits**: Only commit when explicitly asked

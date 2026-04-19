@@ -52,7 +52,7 @@ Both require Google OAuth2 infrastructure (Gmail API + People/Contacts API).
 **Goal:** Running SvelteKit dev server with database, before any features.
 
 1. Init git repo + `.gitignore`
-2. `npm create svelte@latest` — TypeScript, adapter-node, port 5174
+2. `npm create svelte@latest` — TypeScript, adapter-node, port 5175
 3. Install: `better-sqlite3`, `@types/better-sqlite3`, `argon2`
 4. `src/lib/server/db.ts` — connection with WAL + foreign keys
 5. Migration runner + `migrations/001-initial-schema.sql` (all 10 core tables per Section 15)
@@ -243,7 +243,7 @@ Phases 4 and 5 are independent — can be built in either order or in parallel.
 Each phase ends with:
 - `npm run check` passes clean (0 warnings)
 - `npm run build` succeeds
-- Manual browser test on `localhost:5174` covering the golden path
+- Manual browser test on `localhost:5175` covering the golden path
 - Mobile viewport test (375px width)
 - Accessibility spot-check (font sizes, tap targets, contrast, status labels)
 

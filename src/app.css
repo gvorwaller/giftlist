@@ -1,0 +1,129 @@
+/*
+ * Gift Tracker — global design tokens.
+ * Visual direction: warm, domestic, calm. Not clinical.
+ * Source: docs/gift-tracker-mockup-Codex.html + design spec V3 Section 11.2
+ * Accessibility: WCAG AAA 7:1 contrast — muted text darkened from mockup #5e675f to #3d4a3f.
+ */
+
+:root {
+	/* Palette */
+	--bg: #f5f1e8;
+	--paper: #fffdf8;
+	--ink: #1f2a24;
+	--muted: #3d4a3f;
+	--line: #ddd2c2;
+	--green: #2f5d50;
+	--green-soft: #e6efe9;
+	--amber: #bd7a2a;
+	--amber-soft: #fff2df;
+	--rose: #a54d43;
+
+	/* Shadows + radii */
+	--shadow: 0 6px 20px rgba(47, 35, 18, 0.08);
+	--radius-card: 18px;
+	--radius-control: 14px;
+	--radius-pill: 999px;
+
+	/* Typography */
+	--font-serif: Georgia, 'Times New Roman', serif;
+	--font-sans: 'Avenir Next', 'Segoe UI', system-ui, sans-serif;
+
+	/* Spacing scale */
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-5: 24px;
+	--space-6: 32px;
+	--space-7: 48px;
+
+	/* Tap target minimum (accessibility spec) */
+	--tap-target: 48px;
+
+	/* Base body size (accessibility: 18px minimum) */
+	--fs-body: 18px;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+html {
+	font-size: var(--fs-body);
+	-webkit-text-size-adjust: 100%;
+	-webkit-tap-highlight-color: transparent;
+}
+
+body {
+	font-family: var(--font-sans);
+	font-size: var(--fs-body);
+	line-height: 1.5;
+	color: var(--ink);
+	background:
+		radial-gradient(circle at top left, #fff8eb 0, transparent 32%),
+		linear-gradient(180deg, #efe8dc 0%, var(--bg) 22%, var(--bg) 100%);
+	min-height: 100vh;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4 {
+	font-family: var(--font-serif);
+	font-weight: normal;
+	line-height: 1.15;
+	color: var(--ink);
+}
+
+button,
+input,
+select,
+textarea {
+	font: inherit;
+	color: inherit;
+}
+
+/* Enforce 48x48 minimum tap targets on interactive controls by default.
+   Override with .compact on admin dense controls where appropriate. */
+button,
+a.button,
+input[type='submit'],
+input[type='button'] {
+	min-height: var(--tap-target);
+	min-width: var(--tap-target);
+	border-radius: var(--radius-control);
+	cursor: pointer;
+}
+
+a {
+	color: var(--green);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+	outline: 3px solid var(--green);
+	outline-offset: 2px;
+}
+
+/* Respect the OS reduced-motion preference. */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.001ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.001ms !important;
+		scroll-behavior: auto !important;
+	}
+}
