@@ -18,6 +18,8 @@ export interface NextOccasion {
 	kind: Occasion['kind'];
 	date: Date;
 	daysUntil: number;
+	/** For 'birthday' / 'anniversary' with a known start year, the age/count they'll be *on* this next occurrence. */
+	turnsAge: number | null;
 }
 
 export interface PersonWithContext extends Person {
@@ -205,7 +207,7 @@ function computeNextOccasionForPerson(personId: number): NextOccasion | null {
 		.prepare<[number], PersonOccasion & Occasion & { po_id: number; o_id: number }>(
 			`SELECT po.id AS po_id, po.person_id, po.occasion_id, po.is_active, po.notes,
 			        o.id AS o_id, o.title, o.kind, o.recurrence,
-			        o.month, o.day, o.date, o.reminder_days,
+			        o.month, o.day, o.date, o.reminder_days, o.year,
 			        o.created_at, o.updated_at
 			   FROM person_occasions po
 			   JOIN occasions o ON o.id = po.occasion_id
@@ -229,12 +231,17 @@ function computeNextOccasionForPerson(personId: number): NextOccasion | null {
 			day: row.day,
 			date: row.date,
 			reminder_days: row.reminder_days,
+			year: row.year ?? null,
 			created_at: row.created_at,
 			updated_at: row.updated_at
 		};
 		const next = nextOccurrenceDate(occasion, today);
 		if (!next) continue;
 		const daysUntil = Math.round((next.getTime() - today.getTime()) / 86_400_000);
+		const turnsAge =
+			(occasion.kind === 'birthday' || occasion.kind === 'anniversary') && occasion.year != null
+				? next.getFullYear() - occasion.year
+				: null;
 		if (!best || daysUntil < best.daysUntil) {
 			best = {
 				personOccasionId: row.po_id,
@@ -242,7 +249,8 @@ function computeNextOccasionForPerson(personId: number): NextOccasion | null {
 				title: row.title,
 				kind: row.kind,
 				date: next,
-				daysUntil
+				daysUntil,
+				turnsAge
 			};
 		}
 	}

@@ -52,6 +52,12 @@
 				{data.flash.birthdays} birthday{data.flash.birthdays === 1 ? '' : 's'} recorded.
 			</div>
 		{/if}
+		{#if (data.flash?.yearsBackfilled ?? 0) > 0}
+			<div class="flash ok" role="status">
+				Filled in birth year for {data.flash?.yearsBackfilled}
+				{data.flash?.yearsBackfilled === 1 ? 'person' : 'people'}.
+			</div>
+		{/if}
 		{#if form?.error}
 			<div class="flash err" role="alert">{form.error}</div>
 		{/if}
@@ -134,7 +140,15 @@
 
 		{#if data.preview.alreadyImported.length > 0}
 			<section class="card">
-				<h2>Already on file</h2>
+				<div class="row">
+					<h2>Already on file</h2>
+					<form method="POST" action="?/refreshYears">
+						<button type="submit" class="ghost">Refresh birth years</button>
+					</form>
+				</div>
+				<p class="muted">
+					Fills in the birth year on any existing birthday whose year we missed before.
+				</p>
 				<ul class="existing">
 					{#each data.preview.alreadyImported as entry (entry.contact.resource_name)}
 						<li>

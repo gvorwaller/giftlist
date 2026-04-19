@@ -8,8 +8,8 @@
 	let { data }: Props = $props();
 
 	function daysUntilLabel(days: number): string {
-		if (days === 0) return 'Today';
-		if (days === 1) return 'Tomorrow';
+		if (days === 0) return 'today';
+		if (days === 1) return 'tomorrow';
 		if (days < 7) return `in ${days} days`;
 		if (days < 14) return `next week`;
 		if (days < 60) return `in ${days} days`;
@@ -58,7 +58,11 @@
 						</div>
 						{#if person.nextOccasion}
 							<div class="occ">
-								<p class="occ-title">{person.nextOccasion.title}</p>
+								{#if person.nextOccasion.kind === 'birthday' && person.nextOccasion.turnsAge !== null}
+									<p class="occ-title">Turns {person.nextOccasion.turnsAge}</p>
+								{:else}
+									<p class="occ-title">{person.nextOccasion.title}</p>
+								{/if}
 								<p class="occ-when">{daysUntilLabel(person.nextOccasion.daysUntil)}</p>
 							</div>
 						{/if}

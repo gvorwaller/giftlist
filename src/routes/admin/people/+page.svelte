@@ -76,12 +76,19 @@
 									<span class="dot"> · </span>
 								{/if}
 								{#if person.nextOccasion}
-									<span class="occ"
-										>{person.nextOccasion.title} in {person.nextOccasion.daysUntil} day{person
-											.nextOccasion.daysUntil === 1
-											? ''
-											: 's'}</span
-									>
+									{#if person.nextOccasion.kind === 'birthday' && person.nextOccasion.turnsAge !== null}
+										<span class="occ"
+											>Turns {person.nextOccasion.turnsAge} in {person.nextOccasion
+												.daysUntil} day{person.nextOccasion.daysUntil === 1 ? '' : 's'}</span
+										>
+									{:else}
+										<span class="occ"
+											>{person.nextOccasion.title} in {person.nextOccasion.daysUntil} day{person
+												.nextOccasion.daysUntil === 1
+												? ''
+												: 's'}</span
+										>
+									{/if}
 								{/if}
 							</p>
 						</div>

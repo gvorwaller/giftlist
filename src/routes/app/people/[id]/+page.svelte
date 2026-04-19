@@ -42,10 +42,17 @@
 	{#if data.person.nextOccasion}
 		<section class="card hero">
 			<p class="eyebrow">Next up</p>
-			<h2>
-				{data.person.nextOccasion.title}
-				{daysUntilLabel(data.person.nextOccasion.daysUntil)}
-			</h2>
+			{#if data.person.nextOccasion.kind === 'birthday' && data.person.nextOccasion.turnsAge !== null}
+				<h2>
+					Turns {data.person.nextOccasion.turnsAge}
+					{daysUntilLabel(data.person.nextOccasion.daysUntil)}
+				</h2>
+			{:else}
+				<h2>
+					{data.person.nextOccasion.title}
+					{daysUntilLabel(data.person.nextOccasion.daysUntil)}
+				</h2>
+			{/if}
 			<p class="hero-sub">
 				{data.person.nextOccasion.date.toLocaleDateString('en-US', {
 					weekday: 'long',
@@ -81,7 +88,7 @@
 						<p class="meta">
 							{#if o.recurrence === 'annual' && o.month && o.day}
 								{monthName(o.month)}
-								{o.day}
+								{o.day}{#if o.year}, {o.year}{/if}
 							{:else if o.recurrence === 'one_time' && o.date}
 								{o.date}
 							{:else}

@@ -40,6 +40,7 @@ export interface Occasion {
 	day: number | null;
 	date: string | null;
 	reminder_days: number;
+	year: number | null;
 	created_at: string;
 	updated_at: string;
 }

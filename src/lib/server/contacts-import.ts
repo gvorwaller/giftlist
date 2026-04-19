@@ -2,8 +2,8 @@ import { google } from 'googleapis';
 import { getDb } from './db';
 import { getClientForUser } from './google-auth';
 import { logAudit } from './audit';
-import { createPersonBirthday } from './occasions';
-import type { Person } from './types';
+import { createPersonBirthday, setOccasionYearIfMissing } from './occasions';
+import type { Occasion, Person } from './types';
 
 /** A normalized view of a single Google Contact with a birthday. */
 export interface NormalizedContact {
@@ -27,6 +27,7 @@ export interface ContactsPreview {
 export interface ImportResult {
 	peopleCreated: number;
 	birthdaysAssigned: number;
+	yearsBackfilled: number;
 }
 
 function requireMonthDay(
@@ -199,6 +200,7 @@ export function commitImport(
 	const db = getDb();
 	let peopleCreated = 0;
 	let birthdaysAssigned = 0;
+	let yearsBackfilled = 0;
 
 	const byResource = db.prepare<[string], Person>(
 		'SELECT * FROM people WHERE google_resource_name = ?'
@@ -213,10 +215,12 @@ export function commitImport(
 	const adoptExisting = db.prepare(
 		'UPDATE people SET google_resource_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
 	);
-	const hasBirthday = db.prepare(
-		`SELECT 1 AS x FROM person_occasions po
+	const findBirthdayOccasion = db.prepare<[number], Occasion>(
+		`SELECT o.*
+		   FROM person_occasions po
 		   JOIN occasions o ON o.id = po.occasion_id
-		  WHERE po.person_id = ? AND o.kind = 'birthday' LIMIT 1`
+		  WHERE po.person_id = ? AND o.kind = 'birthday'
+		  LIMIT 1`
 	);
 
 	const tx = db.transaction(() => {
@@ -258,17 +262,59 @@ export function commitImport(
 				}
 			}
 
-			const exists = hasBirthday.get(personId) as { x: number } | undefined;
-			if (!exists) {
+			const existingBirthday = findBirthdayOccasion.get(personId);
+			if (!existingBirthday) {
 				createPersonBirthday(personId, c.birthday.month, c.birthday.day, actorUserId, {
-					title: 'Birthday'
+					title: 'Birthday',
+					year: c.birthday.year
 				});
 				birthdaysAssigned += 1;
+			} else if (setOccasionYearIfMissing(existingBirthday.id, c.birthday.year)) {
+				yearsBackfilled += 1;
 			}
 		}
 	});
 
 	tx();
 	void userId;
-	return { peopleCreated, birthdaysAssigned };
+	return { peopleCreated, birthdaysAssigned, yearsBackfilled };
+}
+
+/**
+ * Idempotent sweep over all already-linked Google contacts: updates the
+ * birthday occasion's year when the contact has one and our row doesn't.
+ * Used by the "Refresh birth years" action on /admin/imports/contacts.
+ */
+export async function refreshBirthYears(
+	userId: number,
+	actorUserId: number
+): Promise<{ checked: number; updated: number }> {
+	const { contacts } = await fetchBirthdayContacts(userId);
+	const db = getDb();
+	const byResource = db.prepare<[string], { person_id: number; occasion_id: number; year: number | null }>(
+		`SELECT po.person_id AS person_id, o.id AS occasion_id, o.year AS year
+		   FROM people p
+		   JOIN person_occasions po ON po.person_id = p.id
+		   JOIN occasions o ON o.id = po.occasion_id AND o.kind = 'birthday'
+		  WHERE p.google_resource_name = ?`
+	);
+
+	let updated = 0;
+	for (const c of contacts) {
+		if (c.birthday.year == null) continue;
+		const row = byResource.get(c.resource_name);
+		if (!row) continue;
+		if (row.year != null) continue;
+		if (setOccasionYearIfMissing(row.occasion_id, c.birthday.year)) {
+			updated += 1;
+			logAudit({
+				actorUserId,
+				entityType: 'person',
+				entityId: row.person_id,
+				action: 'backfill_birth_year',
+				summary: `Backfilled birth year ${c.birthday.year} for "${c.display_name}"`
+			});
+		}
+	}
+	return { checked: contacts.length, updated };
 }

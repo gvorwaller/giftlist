@@ -19,7 +19,18 @@
 		o: (typeof data.personOccasions)[number]
 	): string {
 		if (o.recurrence === 'annual' && o.month && o.day) {
-			return `${monthName(o.month)} ${o.day}`;
+			const dateStr = `${monthName(o.month)} ${o.day}`;
+			if (o.year) {
+				const now = new Date();
+				const thisYearOccurrence = new Date(now.getFullYear(), o.month - 1, o.day);
+				const nextOccurrence =
+					thisYearOccurrence.getTime() >= new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+						? thisYearOccurrence
+						: new Date(now.getFullYear() + 1, o.month - 1, o.day);
+				const turns = nextOccurrence.getFullYear() - o.year;
+				return `${dateStr}, ${o.year} — turns ${turns}`;
+			}
+			return dateStr;
 		}
 		if (o.recurrence === 'one_time' && o.date) return o.date;
 		return '—';

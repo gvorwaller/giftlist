@@ -16,6 +16,7 @@ export interface CreateOccasionInput {
 	day?: number | null;
 	date?: string | null;
 	reminder_days?: number;
+	year?: number | null;
 }
 
 export function listOccasions(): Occasion[] {
@@ -43,8 +44,8 @@ export function createOccasion(input: CreateOccasionInput): Occasion {
 	const db = getDb();
 	const info = db
 		.prepare(
-			`INSERT INTO occasions (title, kind, recurrence, month, day, date, reminder_days)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`
+			`INSERT INTO occasions (title, kind, recurrence, month, day, date, reminder_days, year)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.run(
 			input.title,
@@ -53,7 +54,8 @@ export function createOccasion(input: CreateOccasionInput): Occasion {
 			input.month ?? null,
 			input.day ?? null,
 			input.date ?? null,
-			input.reminder_days ?? 21
+			input.reminder_days ?? 21,
+			input.year ?? null
 		);
 	return getOccasionById(Number(info.lastInsertRowid))!;
 }
@@ -64,7 +66,7 @@ export function createPersonBirthday(
 	month: number,
 	day: number,
 	actorUserId: number,
-	opts?: { title?: string; notes?: string | null }
+	opts?: { title?: string; notes?: string | null; year?: number | null }
 ): { occasion: Occasion; link: PersonOccasion } {
 	const title = opts?.title ?? 'Birthday';
 	const occasion = createOccasion({
@@ -73,10 +75,29 @@ export function createPersonBirthday(
 		recurrence: 'annual',
 		month,
 		day,
+		year: opts?.year ?? null,
 		reminder_days: 21
 	});
 	const link = assignOccasionToPerson(personId, occasion.id, actorUserId, { notes: opts?.notes ?? null });
 	return { occasion, link };
+}
+
+/**
+ * Updates an occasion's year when it's missing. No-op if the occasion
+ * already has a year or if the passed year is nullish. Used by the
+ * contacts-import backfill path.
+ */
+export function setOccasionYearIfMissing(occasionId: number, year: number | null): boolean {
+	if (year == null) return false;
+	const db = getDb();
+	const result = db
+		.prepare(
+			`UPDATE occasions
+			    SET year = ?, updated_at = CURRENT_TIMESTAMP
+			  WHERE id = ? AND year IS NULL`
+		)
+		.run(year, occasionId);
+	return result.changes > 0;
 }
 
 export function assignOccasionToPerson(
