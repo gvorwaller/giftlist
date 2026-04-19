@@ -133,3 +133,19 @@ export interface AppStateRow {
 	value: string;
 	updated_at: string;
 }
+
+export type ExternalProvider = 'google';
+
+export interface ExternalToken {
+	id: number;
+	user_id: number;
+	provider: ExternalProvider;
+	scope: string;
+	access_token_encrypted: string | null;
+	access_token_expires_at: string | null;
+	refresh_token_encrypted: string | null;
+	token_type: string | null;
+	account_email: string | null;
+	created_at: string;
+	updated_at: string;
+}

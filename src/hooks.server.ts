@@ -41,10 +41,14 @@ export const handle: Handle = async ({ event, resolve }) => {
 };
 
 // Used by login/logout to set/clear the cookie with consistent attributes.
+// SameSite=Lax (not Strict) so the cookie rides on cross-site redirects back
+// to us — required for OAuth callbacks (Google -> /admin/settings/google/callback).
+// SvelteKit's built-in CSRF guard (origin check on form POSTs) still protects
+// mutations; SameSite=Lax blocks cross-site POSTs anyway.
 export const SESSION_COOKIE_OPTS = {
 	path: '/',
 	httpOnly: true,
-	sameSite: 'strict' as const,
+	sameSite: 'lax' as const,
 	secure: !dev,
 	maxAge: 60 * 60 * 24 * 30 // 30 days
 };
