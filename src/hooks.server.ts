@@ -1,6 +1,9 @@
 import type { Handle } from '@sveltejs/kit';
 import { getDb } from '$server/db';
 import { runMigrations } from '$server/migrate';
+import { SESSION_COOKIE_NAME, validateSession } from '$server/session';
+import { recordLastSeen } from '$server/auth';
+import { dev } from '$app/environment';
 
 // Boot-time: open the DB, run pending migrations. Runs once per process.
 const db = getDb();
@@ -12,7 +15,36 @@ if (applied.length > 0) {
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
-	// Phase 1 will attach the session user here.
-	event.locals.user = null;
+	const token = event.cookies.get(SESSION_COOKIE_NAME);
+
+	if (token) {
+		const result = validateSession(token);
+		if (result) {
+			event.locals.user = result.user;
+
+			// Track manager/admin's last-seen path for the Today screen and admin context.
+			// Skip noisy asset routes.
+			const path = event.url.pathname;
+			if (!path.startsWith('/_app') && !path.startsWith('/api/')) {
+				recordLastSeen(result.user.id, path);
+			}
+		} else {
+			// Session invalid or expired — clear the cookie.
+			event.cookies.delete(SESSION_COOKIE_NAME, { path: '/' });
+			event.locals.user = null;
+		}
+	} else {
+		event.locals.user = null;
+	}
+
 	return resolve(event);
+};
+
+// Used by login/logout to set/clear the cookie with consistent attributes.
+export const SESSION_COOKIE_OPTS = {
+	path: '/',
+	httpOnly: true,
+	sameSite: 'strict' as const,
+	secure: !dev,
+	maxAge: 60 * 60 * 24 * 30 // 30 days
 };

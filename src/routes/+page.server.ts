@@ -1,12 +1,7 @@
+import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { getDb } from '$server/db';
 
-export const load: PageServerLoad = () => {
-	const db = getDb();
-	const row = db
-		.prepare<[], { value: string }>("SELECT value FROM app_state WHERE key = 'schema_version'")
-		.get();
-	return {
-		schemaVersion: row ? parseInt(row.value, 10) : 0
-	};
+export const load: PageServerLoad = ({ locals }) => {
+	if (!locals.user) throw redirect(303, '/login');
+	throw redirect(303, locals.user.role === 'admin' ? '/admin' : '/app/today');
 };

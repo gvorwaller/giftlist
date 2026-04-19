@@ -1,5 +1,4 @@
 import Database from 'better-sqlite3';
-import { env } from '$env/dynamic/private';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
@@ -8,7 +7,9 @@ export type DB = Database.Database;
 let instance: DB | null = null;
 
 function resolveDbPath(): string {
-	const raw = env.DATABASE_PATH ?? './data/gifttracker.db';
+	// Reading process.env directly (not $env/dynamic/private) so this module
+	// also loads cleanly from Node scripts (seed, migrations CLI, tests).
+	const raw = process.env.DATABASE_PATH ?? './data/gifttracker.db';
 	return resolve(process.cwd(), raw);
 }
 
