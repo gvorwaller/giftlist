@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { PageData } from './$types';
-	import BottomNav from '$components/BottomNav.svelte';
 
 	interface Props {
 		data: PageData;
@@ -29,8 +28,6 @@
 		</form>
 	</div>
 </main>
-
-<BottomNav role={data.user.role} />
 
 <style>
 	.admin-home {
