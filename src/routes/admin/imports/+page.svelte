@@ -1,3 +1,13 @@
+<script lang="ts">
+	import type { PageData } from './$types';
+
+	interface Props {
+		data: PageData;
+	}
+
+	let { data }: Props = $props();
+</script>
+
 <svelte:head>
 	<title>Imports — Admin — Gift Tracker</title>
 </svelte:head>
@@ -10,11 +20,22 @@
 	</header>
 
 	<section class="card">
-		<h2>Google Contacts</h2>
-		<p class="body">
-			Import contacts with a birthday from the Google account connected in
-			<a href="/admin/settings">Settings</a>. Phase 2c.
-		</p>
+		<div class="row">
+			<div>
+				<h2>Google Contacts</h2>
+				<p class="body">
+					{#if data.googleConnected}
+						Using <strong>{data.googleEmail ?? 'your Google account'}</strong>. Pulls contacts
+						with a birthday date.
+					{:else}
+						Connect a Google account in <a href="/admin/settings">Settings</a> first.
+					{/if}
+				</p>
+			</div>
+		</div>
+		{#if data.googleConnected}
+			<a class="primary" href="/admin/imports/contacts">Review contacts</a>
+		{/if}
 	</section>
 
 	<section class="card">
@@ -74,5 +95,29 @@
 	.body {
 		font-size: 16px;
 		color: var(--ink);
+	}
+
+	strong {
+		color: var(--green);
+	}
+
+	.row {
+		margin-bottom: 14px;
+	}
+
+	.primary {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: var(--tap-target);
+		padding: 10px 20px;
+		background: var(--green);
+		color: var(--paper);
+		border: 1px solid var(--green);
+		border-radius: var(--radius-control);
+		font-family: var(--font-sans);
+		font-size: 16px;
+		font-weight: 600;
+		text-decoration: none;
 	}
 </style>

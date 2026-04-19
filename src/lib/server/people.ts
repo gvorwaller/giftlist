@@ -60,13 +60,38 @@ export function listPeople(opts: ListPeopleOptions = {}): PersonWithContext[] {
 			const ad = a.nextOccasion?.daysUntil ?? Number.POSITIVE_INFINITY;
 			const bd = b.nextOccasion?.daysUntil ?? Number.POSITIVE_INFINITY;
 			if (ad !== bd) return ad - bd;
-			return a.display_name.localeCompare(b.display_name);
+			return compareByLastName(a, b);
 		});
 	} else {
-		enriched.sort((a, b) => a.display_name.localeCompare(b.display_name));
+		enriched.sort(compareByLastName);
 	}
 
 	return enriched;
+}
+
+/**
+ * Extracts a sortable last name from a person's full_name (falls back to display_name).
+ * Handles "Last, First" format and single-name rows. Used anywhere we need
+ * alphabetical sort — phone book ordering, not first-name ordering.
+ */
+export function sortKeyLastName(p: Pick<Person, 'full_name' | 'display_name'>): string {
+	const source = (p.full_name ?? p.display_name ?? '').trim();
+	if (!source) return '';
+	if (source.includes(',')) {
+		// "Player, Joshua" -> "Player"
+		return source.split(',')[0].trim().toLocaleLowerCase();
+	}
+	const tokens = source.split(/\s+/).filter(Boolean);
+	if (tokens.length === 0) return source.toLocaleLowerCase();
+	return tokens[tokens.length - 1].toLocaleLowerCase();
+}
+
+function compareByLastName(a: Person, b: Person): number {
+	const ka = sortKeyLastName(a);
+	const kb = sortKeyLastName(b);
+	const primary = ka.localeCompare(kb);
+	if (primary !== 0) return primary;
+	return a.display_name.localeCompare(b.display_name);
 }
 
 export function getPersonById(id: number): Person | undefined {

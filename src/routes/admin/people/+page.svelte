@@ -38,6 +38,14 @@
 		</form>
 
 		<div class="controls">
+			<a
+				class="toggle"
+				href={data.sort === 'alphabetical'
+					? (data.includeArchived ? '?archived=1' : '?')
+					: (data.includeArchived ? '?sort=alphabetical&archived=1' : '?sort=alphabetical')}
+			>
+				Sort: {data.sort === 'alphabetical' ? 'by last name' : 'by upcoming'}
+			</a>
 			<a class="toggle" href={data.includeArchived ? '?' : '?archived=1'}>
 				{data.includeArchived ? 'Hide archived' : 'Show archived'}
 			</a>
@@ -49,8 +57,8 @@
 		<div class="empty">
 			<p>No people yet.</p>
 			<p class="hint">
-				Add one manually, or run the Google Contacts import from <a href="/admin/imports">Imports</a>
-				(coming in Phase 2b).
+				Add one manually, or run the Google Contacts import from
+				<a href="/admin/imports">Imports</a>.
 			</p>
 		</div>
 	{:else}

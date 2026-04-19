@@ -23,6 +23,7 @@ export interface Person {
 	default_shipping_address: string | null;
 	notes: string | null;
 	is_archived: 0 | 1;
+	google_resource_name: string | null;
 	created_at: string;
 	updated_at: string;
 }
