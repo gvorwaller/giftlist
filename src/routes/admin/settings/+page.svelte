@@ -83,8 +83,40 @@
 	</section>
 
 	<section class="card">
-		<h2>Notifications</h2>
-		<p class="muted">Daily reminder digest config — comes in Phase 5.</p>
+		<div class="row">
+			<div>
+				<h2>Notifications</h2>
+				<p class="muted">Daily reminder digest. Configure via <code>.env</code> for now.</p>
+			</div>
+			<a href="/admin/system" class="ghost">Run now or view history</a>
+		</div>
+
+		<dl class="kv">
+			<div>
+				<dt>Reminder lead time</dt>
+				<dd>{data.notificationConfig.leadDays} days</dd>
+			</div>
+			<div>
+				<dt>Email channel</dt>
+				<dd>
+					{#if data.notificationConfig.channels.email}
+						Configured → <span class="mono">{data.notificationConfig.emailTo}</span>
+					{:else}
+						Not configured. Set <code>SMTP_HOST</code>, <code>SMTP_FROM</code>, <code>SMTP_TO</code> (and optional <code>SMTP_PORT</code>/<code>SMTP_USER</code>/<code>SMTP_PASS</code>/<code>SMTP_SECURE</code>).
+					{/if}
+				</dd>
+			</div>
+			<div>
+				<dt>Telegram channel</dt>
+				<dd>
+					{#if data.notificationConfig.channels.telegram}
+						Configured → chat <span class="mono">{data.notificationConfig.telegramChatMasked}</span>
+					{:else}
+						Not configured. Set <code>TELEGRAM_BOT_TOKEN</code> and <code>TELEGRAM_CHAT_ID</code>.
+					{/if}
+				</dd>
+			</div>
+		</dl>
 	</section>
 </main>
 
@@ -199,6 +231,20 @@
 		font-family: var(--font-sans);
 		font-size: 16px;
 		color: var(--ink);
+	}
+
+	code {
+		font-family: 'SF Mono', ui-monospace, monospace;
+		font-size: 13px;
+		background: var(--bg);
+		padding: 2px 6px;
+		border-radius: 4px;
+	}
+
+	.mono {
+		font-family: 'SF Mono', ui-monospace, monospace;
+		font-size: 13px;
+		color: var(--green);
 	}
 
 	.actions {
