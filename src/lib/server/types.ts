@@ -136,6 +136,69 @@ export interface AppStateRow {
 	updated_at: string;
 }
 
+export interface PersonAlias {
+	id: number;
+	person_id: number;
+	alias_name: string;
+	source: 'manual' | 'import_assigned';
+	created_at: string;
+}
+
+export type ImportRunSource = 'amazon_email';
+export type ImportRunStatus = 'running' | 'ready_for_review' | 'committed' | 'error';
+
+export interface ImportRun {
+	id: number;
+	source: ImportRunSource;
+	actor_user_id: number;
+	started_at: string;
+	finished_at: string | null;
+	status: ImportRunStatus;
+	fetched_count: number;
+	parsed_count: number;
+	skipped_count: number;
+	created_count: number;
+	error_message: string | null;
+}
+
+export type EmailType =
+	| 'order_placed'
+	| 'shipped'
+	| 'delivered'
+	| 'marketing'
+	| 'review_request'
+	| 'unknown';
+
+export type ImportRowDisposition = 'pending' | 'accepted' | 'skipped' | 'failed';
+export type MatchConfidence = 'exact' | 'alias' | 'fuzzy' | 'none';
+
+export interface ImportRow {
+	id: number;
+	import_run_id: number;
+	source_message_id: string;
+	source_thread_id: string | null;
+	subject: string | null;
+	received_at: string | null;
+	from_address: string | null;
+	email_type: EmailType;
+	parsed_title: string | null;
+	parsed_order_id: string | null;
+	parsed_price_cents: number | null;
+	parsed_tracking_number: string | null;
+	parsed_carrier: string | null;
+	parsed_recipient_name: string | null;
+	parsed_shipping_address: string | null;
+	parsed_gift_message: string | null;
+	match_person_id: number | null;
+	match_confidence: MatchConfidence | null;
+	match_candidates_json: string | null;
+	disposition: ImportRowDisposition;
+	gift_id: number | null;
+	error_message: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
 export type ExternalProvider = 'google';
 
 export interface ExternalToken {

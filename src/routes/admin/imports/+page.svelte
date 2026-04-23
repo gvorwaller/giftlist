@@ -39,11 +39,21 @@
 	</section>
 
 	<section class="card">
-		<h2>Amazon email parsing</h2>
-		<p class="body">
-			Scan a Gmail label for Amazon order confirmations, shipping notifications, and delivery
-			receipts; match recipients against people on file. Phase 4.
-		</p>
+		<div class="row">
+			<div>
+				<h2>Amazon email parsing</h2>
+				<p class="body">
+					Scan the <code>Giftlist/Amazon/Inbox</code> label, parse order confirmations /
+					shipping / delivery emails, match recipients, and stage them for your review
+					before creating gifts.
+				</p>
+			</div>
+		</div>
+		{#if data.googleConnected}
+			<a class="primary" href="/admin/imports/amazon">Open Amazon import</a>
+		{:else}
+			<p class="body">Connect Google in <a href="/admin/settings">Settings</a> first.</p>
+		{/if}
 	</section>
 </main>
 
@@ -99,6 +109,14 @@
 
 	strong {
 		color: var(--green);
+	}
+
+	code {
+		font-family: 'SF Mono', ui-monospace, monospace;
+		font-size: 13px;
+		background: var(--bg);
+		padding: 2px 6px;
+		border-radius: 4px;
 	}
 
 	.row {

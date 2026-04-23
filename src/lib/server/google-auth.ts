@@ -4,10 +4,19 @@ import { getDecryptedToken, saveToken } from './external-tokens';
 
 export const GOOGLE_SCOPES = [
 	'https://www.googleapis.com/auth/contacts.readonly',
-	'https://www.googleapis.com/auth/gmail.readonly',
+	// gmail.modify is a superset of gmail.readonly; needed so the app can
+	// add/remove labels and trash parsed messages during Amazon import.
+	'https://www.googleapis.com/auth/gmail.modify',
 	'https://www.googleapis.com/auth/userinfo.email',
 	'openid'
 ];
+
+export const REQUIRED_GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.modify';
+
+export function tokenHasGmailModify(scopeString: string | null | undefined): boolean {
+	if (!scopeString) return false;
+	return scopeString.split(/\s+/).includes(REQUIRED_GMAIL_SCOPE);
+}
 
 function requireEnv(name: string): string {
 	const v = process.env[name];

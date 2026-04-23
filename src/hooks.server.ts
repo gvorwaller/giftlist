@@ -3,6 +3,7 @@ import { getDb } from '$server/db';
 import { runMigrations } from '$server/migrate';
 import { SESSION_COOKIE_NAME, validateSession } from '$server/session';
 import { recordLastSeen } from '$server/auth';
+import { startScheduler } from '$server/scheduler';
 import { dev } from '$app/environment';
 
 // Boot-time: open the DB, run pending migrations. Runs once per process.
@@ -13,6 +14,9 @@ if (applied.length > 0) {
 } else {
 	console.log(`[boot] schema at version ${currentVersion}`);
 }
+
+// Start cron. Self-disables outside production / when ENABLE_CRON != 'true'.
+startScheduler();
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const token = event.cookies.get(SESSION_COOKIE_NAME);
