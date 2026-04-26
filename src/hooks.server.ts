@@ -1,3 +1,11 @@
+// Load /opt/giftlist/.env (or ./.env in dev) into process.env before any other
+// boot-time code reads env vars. dotenv only sets keys that aren't already
+// populated, so PM2-injected vars (and Vite's dev-only injection) take
+// precedence over the file. Required so prod actually picks up ENABLE_CRON,
+// REMINDER_CRON, BASE_URL, SMTP_*, TELEGRAM_*, etc. without baking them into
+// ecosystem.config.cjs.
+import 'dotenv/config';
+
 import type { Handle } from '@sveltejs/kit';
 import { getDb } from '$server/db';
 import { runMigrations } from '$server/migrate';
