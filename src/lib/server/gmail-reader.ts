@@ -192,6 +192,37 @@ export async function moveToLabel(
 	});
 }
 
+/**
+ * Bulk-moves up to 1000 messages per call via Gmail's batchModify endpoint.
+ * Single round trip regardless of message count — massively faster than calling
+ * moveToLabel in a loop. Silently no-ops when messageIds is empty.
+ */
+export async function batchMoveToLabel(
+	userId: number,
+	messageIds: string[],
+	fromLabel: string,
+	toLabel: string
+): Promise<void> {
+	if (messageIds.length === 0) return;
+	const auth = getClientForUser(userId);
+	const gmail = makeGmail(auth);
+	const [fromId, toId] = await Promise.all([
+		resolveLabelId(gmail, fromLabel),
+		resolveLabelId(gmail, toLabel)
+	]);
+	const CHUNK = 1000;
+	for (let i = 0; i < messageIds.length; i += CHUNK) {
+		await gmail.users.messages.batchModify({
+			userId: 'me',
+			requestBody: {
+				ids: messageIds.slice(i, i + CHUNK),
+				addLabelIds: [toId],
+				removeLabelIds: [fromId]
+			}
+		});
+	}
+}
+
 export async function trashMessage(userId: number, messageId: string): Promise<void> {
 	const auth = getClientForUser(userId);
 	const gmail = makeGmail(auth);

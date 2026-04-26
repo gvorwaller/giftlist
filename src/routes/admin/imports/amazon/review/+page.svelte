@@ -81,9 +81,10 @@
 		<form method="POST" action="?/commit" class="review-form">
 			<input type="hidden" name="run_id" value={data.run.id} />
 			<p class="muted bulk">
-				Default action per row is <strong>accept with the matched person</strong>. Switch to
-				<em>skip</em> to dispose of marketing/review emails; leave person blank to force a
-				manual assignment.
+				Default per row is <strong>accept with matched person</strong> for order lifecycle
+				emails, <strong>skip</strong> for marketing/review noise. Pick <strong>leave pending</strong>
+				on anything you're unsure about — the email stays in Inbox and re-surfaces on the next
+				scan. Leave person blank to force a manual assignment.
 			</p>
 
 			<ul class="rows">
@@ -148,7 +149,11 @@
 										r.email_type === 'review_request' ||
 										r.email_type === 'unknown'}
 								/>
-								<span>Skip</span>
+								<span>Skip → move to Processed</span>
+							</label>
+							<label class="radio leave">
+								<input type="radio" name="disposition_{r.id}" value="leave" />
+								<span>Leave pending → stays in Inbox, re-surfaces next scan</span>
 							</label>
 
 							<label class="person-select">
@@ -263,6 +268,10 @@
 		font-size: 13px;
 		color: var(--muted);
 		margin-bottom: 12px;
+	}
+
+	.choice-grid .radio.leave {
+		grid-column: 1 / span 2;
 	}
 
 	.rows {

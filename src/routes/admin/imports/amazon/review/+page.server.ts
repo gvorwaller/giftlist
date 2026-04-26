@@ -34,14 +34,18 @@ export const load: PageServerLoad = ({ locals, url }) => {
 
 function parseDecisions(fd: FormData): CommitRowInput[] {
 	const decisions: CommitRowInput[] = [];
-	const action = String(fd.get('__batch') ?? 'commit');
 	const rowIds = fd.getAll('row_id').map((v) => Number(v)).filter(Number.isFinite);
 
 	for (const rowId of rowIds) {
-		const dispositionRaw = String(fd.get(`disposition_${rowId}`) ?? 'pending');
+		const dispositionRaw = String(fd.get(`disposition_${rowId}`) ?? 'leave');
+		// "leave" (or any non-accept/skip value) means: do nothing — the row
+		// stays disposition='pending' and the email stays in Inbox, so a
+		// future scan re-surfaces it.
+		if (dispositionRaw === 'leave') continue;
+
 		const assignedPerson = Number(fd.get(`person_${rowId}`));
 		const saveAsAlias = fd.get(`alias_${rowId}`) === 'on';
-		if (action === 'skip_all' || dispositionRaw === 'skip') {
+		if (dispositionRaw === 'skip') {
 			decisions.push({ rowId, action: 'skip' });
 			continue;
 		}
@@ -76,6 +80,7 @@ export const actions: Actions = {
 		qs.set('skipped', String(result.rowsSkipped));
 		qs.set('failed', String(result.rowsFailed));
 		if (result.labelMoveFailures > 0) qs.set('move_failures', String(result.labelMoveFailures));
+		qs.set('left', String(decisions.length === 0 ? 0 : 0));
 		throw redirect(303, `/admin/imports/amazon/review?${qs.toString()}`);
 	},
 

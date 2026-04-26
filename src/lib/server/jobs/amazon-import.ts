@@ -1,9 +1,9 @@
 import { getDb } from '../db';
 import { runJob, type JobResult } from './runner';
 import {
+	batchMoveToLabel,
 	getFullMessage,
 	listLabelMessages,
-	moveToLabel,
 	trashMessagesUnderLabel
 } from '../gmail-reader';
 import { parseAmazonEmail } from '../amazon-parser';
@@ -107,8 +107,11 @@ export async function runAmazonScan(
 
 			let summaries;
 			try {
+				// Default to 50 per run so scans fit inside SvelteKit's action
+				// timeout against a first-time backlog. Idempotent — re-run to
+				// pick up the next 50.
 				summaries = await listLabelMessages(userId, INBOX_LABEL, {
-					maxResults: opts?.limit ?? 200
+					maxResults: opts?.limit ?? 50
 				});
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
@@ -121,46 +124,56 @@ export async function runAmazonScan(
 			let newRows = 0;
 			let existing = 0;
 
-			for (const s of summaries) {
-				if (existingIdStmt.get(s.id)) {
-					existing += 1;
-					continue;
-				}
-				let full;
-				try {
-					full = await getFullMessage(userId, s.id);
-				} catch (err) {
-					console.warn(`[amazon-import] failed to fetch ${s.id}:`, err);
-					continue;
-				}
-				const parse = parseAmazonEmail(full);
-				parsed += 1;
+			// Skip already-staged ids before hitting Gmail for bodies.
+			const fresh = summaries.filter((s) => !existingIdStmt.get(s.id));
+			existing = summaries.length - fresh.length;
 
-				const match = matchRecipient(parse.recipientName);
-				const candidatesJson = JSON.stringify(match.candidates);
-
-				insertRowStmt.run(
-					run.id,
-					s.id,
-					s.threadId,
-					s.subject,
-					s.receivedAt,
-					s.from,
-					parse.emailType,
-					parse.title,
-					parse.orderId,
-					parse.priceCents,
-					parse.trackingNumber,
-					parse.carrier,
-					parse.recipientName,
-					parse.shippingAddress,
-					parse.giftMessage,
-					match.personId,
-					match.confidence,
-					candidatesJson,
-					defaultDisposition(parse.emailType)
+			// Bounded parallelism for getFullMessage. messages.get is 5 quota
+			// units; Gmail allows 250 units/sec/user, so concurrency 10 = 50
+			// units/sec sustained — comfortably below the throttle. Serial
+			// fetches froze the admin round-trip on the first 200-msg attempt.
+			const FETCH_CONCURRENCY = 10;
+			for (let offset = 0; offset < fresh.length; offset += FETCH_CONCURRENCY) {
+				const batch = fresh.slice(offset, offset + FETCH_CONCURRENCY);
+				const results = await Promise.allSettled(
+					batch.map((s) => getFullMessage(userId, s.id))
 				);
-				newRows += 1;
+				for (let i = 0; i < batch.length; i++) {
+					const s = batch[i];
+					const res = results[i];
+					if (res.status !== 'fulfilled') {
+						console.warn(`[amazon-import] failed to fetch ${s.id}:`, res.reason);
+						continue;
+					}
+					const parse = parseAmazonEmail(res.value);
+					parsed += 1;
+
+					const match = matchRecipient(parse.recipientName);
+					const candidatesJson = JSON.stringify(match.candidates);
+
+					insertRowStmt.run(
+						run.id,
+						s.id,
+						s.threadId,
+						s.subject,
+						s.receivedAt,
+						s.from,
+						parse.emailType,
+						parse.title,
+						parse.orderId,
+						parse.priceCents,
+						parse.trackingNumber,
+						parse.carrier,
+						parse.recipientName,
+						parse.shippingAddress,
+						parse.giftMessage,
+						match.personId,
+						match.confidence,
+						candidatesJson,
+						defaultDisposition(parse.emailType)
+					);
+					newRows += 1;
+				}
 			}
 
 			bumpCounts(run.id, { parsed_count: parsed });
@@ -249,6 +262,10 @@ export async function commitReviewedRows(
 		byOrder.get(key)!.push(d);
 	}
 
+	// Collect message ids to move in a single Gmail batchModify at the end —
+	// one round trip instead of one per message.
+	const messagesToMove: string[] = [];
+
 	// Accept pass.
 	for (const [, group] of byOrder) {
 		// Sort the group by email_type in lifecycle order so the gift is created
@@ -293,18 +310,11 @@ export async function commitReviewedRows(
 					null,
 					row.id
 				);
+				messagesToMove.push(row.source_message_id);
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
 				updateRow.run('failed', giftId, personId, row.match_confidence, message, row.id);
 				result.rowsFailed += 1;
-				continue;
-			}
-
-			try {
-				await moveToLabel(userId, row.source_message_id, INBOX_LABEL, PROCESSED_LABEL);
-			} catch (err) {
-				console.warn(`[amazon-import] label move failed for ${row.source_message_id}:`, err);
-				result.labelMoveFailures += 1;
 			}
 		}
 	}
@@ -315,12 +325,17 @@ export async function commitReviewedRows(
 		if (!row) continue;
 		updateRow.run('skipped', row.gift_id, row.match_person_id, row.match_confidence, null, row.id);
 		result.rowsSkipped += 1;
-		try {
-			await moveToLabel(userId, row.source_message_id, INBOX_LABEL, PROCESSED_LABEL);
-		} catch (err) {
-			console.warn(`[amazon-import] label move failed for skipped ${row.source_message_id}:`, err);
-			result.labelMoveFailures += 1;
-		}
+		messagesToMove.push(row.source_message_id);
+	}
+
+	// Single batchModify for every accepted + skipped message. 1 round trip
+	// total (chunks of 1000) vs. one per message — the difference between a
+	// sub-second commit and a multi-minute hang for the first skip-all.
+	try {
+		await batchMoveToLabel(userId, messagesToMove, INBOX_LABEL, PROCESSED_LABEL);
+	} catch (err) {
+		console.warn('[amazon-import] batch label move failed:', err);
+		result.labelMoveFailures = messagesToMove.length;
 	}
 
 	return result;

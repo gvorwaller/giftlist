@@ -22,6 +22,10 @@
 
 <svelte:head>
 	<title>Amazon imports — Admin — Gift Tracker</title>
+	{#if data.latestRun?.status === 'running'}
+		<!-- Auto-poll while a scan is in progress so the card updates without a manual reload. -->
+		<meta http-equiv="refresh" content="3" />
+	{/if}
 </svelte:head>
 
 <main class="amazon-imports">
@@ -69,27 +73,60 @@
 						Using <strong>{data.accountEmail ?? '(unknown)'}</strong>.
 					</p>
 				</div>
-				<form method="POST" action="?/scan">
+				<form method="POST" action="?/scan" class="scan-form">
+					<label class="batch">
+						<span>Batch size</span>
+						<select name="limit">
+							<option value="50">50  · ~10s</option>
+							<option value="100">100  · ~15s</option>
+							<option value="200" selected>200 · ~25s</option>
+							<option value="300">300 · ~35s</option>
+							<option value="500">500 · ~60s</option>
+						</select>
+					</label>
 					<button type="submit" class="primary">Scan now</button>
 				</form>
 			</div>
 			<p class="muted">
-				Scans up to 200 messages per run. Scan is idempotent — re-running only parses new
-				messages. Gifts aren't created until you review the staged rows.
+				Scan is idempotent — re-run to pick up the next batch. Bigger batches mean longer waits
+				(the browser blocks until Gmail round-trips finish). Gifts aren't created until you
+				review the staged rows.
 			</p>
 		</section>
 
 		{#if data.latestRun}
 			<section class="card">
 				<p class="eyebrow">Latest run</p>
+				{#if data.latestRun.status === 'running'}
+					<p class="progress-note">
+						Scan in progress… this page auto-refreshes every 3 seconds until it finishes.
+					</p>
+				{/if}
 				<dl class="kv">
 					<div><dt>Status</dt><dd class={data.latestRun.status}>{data.latestRun.status}</dd></div>
 					<div><dt>Started</dt><dd>{formatTimestamp(data.latestRun.started_at)}</dd></div>
 					<div><dt>Finished</dt><dd>{formatTimestamp(data.latestRun.finished_at)}</dd></div>
-					<div><dt>Fetched</dt><dd>{data.latestRun.fetched_count}</dd></div>
-					<div><dt>Parsed</dt><dd>{data.latestRun.parsed_count}</dd></div>
-					<div><dt>Pending review</dt><dd class:alert={data.pendingCount > 0}>{data.pendingCount}</dd></div>
+					<div><dt>Fetched from Gmail</dt><dd>{data.latestRun.fetched_count}</dd></div>
+					<div>
+						<dt>Already staged</dt>
+						<dd>{data.alreadyStaged}</dd>
+					</div>
+					<div><dt>Parsed this run</dt><dd>{data.latestRun.parsed_count}</dd></div>
+					<div>
+						<dt>Auto-skipped</dt>
+						<dd>{data.autoSkippedCount}</dd>
+					</div>
+					<div>
+						<dt>Pending review</dt>
+						<dd class:alert={data.pendingCount > 0}>{data.pendingCount}</dd>
+					</div>
 				</dl>
+				<p class="muted">
+					<strong>Fetched</strong> = Gmail returned this many label hits. <strong>Already staged</strong>
+					were parsed in an earlier scan (dedup'd via message id). <strong>Parsed this run</strong>
+					went through the parser fresh. <strong>Auto-skipped</strong> were marketing /
+					review-request emails that don't need your attention.
+				</p>
 				{#if data.latestRun.error_message}
 					<p class="err-line">{data.latestRun.error_message}</p>
 				{/if}
@@ -203,4 +240,47 @@
 
 	.err-line { color: var(--rose); font-size: 14px; margin-top: 8px; }
 	.actions { margin-top: 14px; }
+
+	.progress-note {
+		background: var(--amber-soft);
+		border: 1px solid var(--amber);
+		border-radius: var(--radius-control);
+		padding: 10px 14px;
+		font-family: var(--font-sans);
+		font-size: 14px;
+		color: var(--amber);
+		margin-bottom: 14px;
+	}
+
+	.scan-form {
+		display: flex;
+		align-items: flex-end;
+		gap: 12px;
+	}
+
+	.batch {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.batch span {
+		font-family: var(--font-sans);
+		font-size: 11px;
+		font-weight: 700;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--muted);
+	}
+
+	.batch select {
+		min-height: var(--tap-target);
+		padding: 8px 12px;
+		font-family: var(--font-sans);
+		font-size: 15px;
+		background: var(--bg);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		color: var(--ink);
+	}
 </style>

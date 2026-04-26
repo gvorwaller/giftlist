@@ -1,7 +1,10 @@
 import { getDb } from '../db';
 import type { JobRun, JobStatus } from '../types';
 
-const STALE_RUNNING_THRESHOLD_MINUTES = 60;
+// Kept deliberately tight: every job we run completes in well under 5 min.
+// A 'running' row older than this always means the process died mid-flight
+// (crash, HMR reload, container restart) and should be reclaimed.
+const STALE_RUNNING_THRESHOLD_MINUTES = 5;
 
 export interface JobResult<T> {
 	runId: number;
