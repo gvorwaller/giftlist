@@ -26,11 +26,19 @@ export interface PackageItem {
 	expectedEta: string | null;
 }
 
+export interface PendingImports {
+	count: number;
+	latestRunId: number | null;
+	latestRunStartedAt: string | null;
+	reviewUrl: string;
+}
+
 export interface ReminderSummary {
 	leadDays: number;
 	needsAttention: UpcomingItem[];
 	comingUp: UpcomingItem[];
 	packagesInTransit: PackageItem[];
+	pendingImports: PendingImports | null;
 	channelResults: ChannelResult[];
 	notifiedSubject: string;
 }
@@ -48,6 +56,42 @@ function getConfiguredLeadDays(): number {
 	const fromEnv = Number(process.env.REMINDER_LEAD_DAYS);
 	if (Number.isFinite(fromEnv) && fromEnv > 0) return Math.floor(fromEnv);
 	return 21;
+}
+
+function getBaseUrl(): string {
+	const raw = (process.env.BASE_URL ?? '').trim();
+	if (!raw) return 'http://localhost:5175';
+	return raw.replace(/\/+$/, '');
+}
+
+function collectPendingImports(): PendingImports | null {
+	const db = getDb();
+	const row = db
+		.prepare<[], { cnt: number }>(
+			`SELECT COUNT(*) AS cnt FROM import_rows WHERE disposition = 'pending'`
+		)
+		.get();
+	const count = row?.cnt ?? 0;
+	if (count === 0) return null;
+
+	const run = db
+		.prepare<[], { id: number; started_at: string }>(
+			`SELECT id, started_at FROM import_runs
+			  WHERE source = 'amazon_email'
+			  ORDER BY started_at DESC LIMIT 1`
+		)
+		.get();
+
+	const reviewUrl = run
+		? `${getBaseUrl()}/admin/imports/amazon/review?run=${run.id}`
+		: `${getBaseUrl()}/admin/imports/amazon`;
+
+	return {
+		count,
+		latestRunId: run?.id ?? null,
+		latestRunStartedAt: run?.started_at ?? null,
+		reviewUrl
+	};
 }
 
 type Row = PersonOccasion &
@@ -176,9 +220,10 @@ function composeDigest(input: {
 	needsAttention: UpcomingItem[];
 	comingUp: UpcomingItem[];
 	packages: PackageItem[];
+	pendingImports: PendingImports | null;
 	leadDays: number;
 }): { subject: string; text: string } {
-	const { needsAttention, comingUp, packages, leadDays } = input;
+	const { needsAttention, comingUp, packages, pendingImports, leadDays } = input;
 	const parts: string[] = [];
 
 	if (needsAttention.length > 0) {
@@ -215,10 +260,31 @@ function composeDigest(input: {
 		);
 	}
 
+	if (pendingImports && pendingImports.count > 0) {
+		const noun = pendingImports.count === 1 ? 'email' : 'emails';
+		parts.push(
+			`Imports waiting for review:\n` +
+				`· ${pendingImports.count} Amazon ${noun} staged from the latest scan.\n` +
+				`  Review at ${pendingImports.reviewUrl}`
+		);
+	}
+
 	const text = parts.join('\n\n');
+
+	const subjectBits: string[] = [];
+	if (needsAttention.length > 0) {
+		subjectBits.push(
+			`${needsAttention.length} occasion${needsAttention.length === 1 ? '' : 's'} need attention`
+		);
+	}
+	if (pendingImports && pendingImports.count > 0) {
+		subjectBits.push(
+			`${pendingImports.count} import${pendingImports.count === 1 ? '' : 's'} to review`
+		);
+	}
 	const subject =
-		needsAttention.length > 0
-			? `Gift tracker — ${needsAttention.length} occasion${needsAttention.length === 1 ? '' : 's'} need attention`
+		subjectBits.length > 0
+			? `Gift tracker — ${subjectBits.join(' · ')}`
 			: `Gift tracker — daily digest`;
 
 	return { subject, text };
@@ -237,11 +303,13 @@ export async function runReminderJob(opts?: {
 			const needsAttention = all.filter((i) => !i.hasHandledGift);
 			const comingUp = all.filter((i) => i.hasHandledGift);
 			const packages = collectPackages();
+			const pendingImports = collectPendingImports();
 
 			const { subject, text } = composeDigest({
 				needsAttention,
 				comingUp,
 				packages,
+				pendingImports,
 				leadDays
 			});
 
@@ -255,16 +323,21 @@ export async function runReminderJob(opts?: {
 				needsAttention,
 				comingUp,
 				packagesInTransit: packages,
+				pendingImports,
 				channelResults,
 				notifiedSubject: subject
 			};
 		},
 		{
 			summarize: (r) =>
-				`${r.needsAttention.length} need attention, ${r.comingUp.length} handled, ${r.packagesInTransit.length} packages · delivered: ${r.channelResults
-					.filter((c) => c.delivered)
-					.map((c) => c.channel)
-					.join(',') || 'none'}`
+				`${r.needsAttention.length} need attention, ${r.comingUp.length} handled, ${r.packagesInTransit.length} packages, ${
+					r.pendingImports?.count ?? 0
+				} pending imports · delivered: ${
+					r.channelResults
+						.filter((c) => c.delivered)
+						.map((c) => c.channel)
+						.join(',') || 'none'
+				}`
 		}
 	);
 }
@@ -276,12 +349,20 @@ export function previewReminderDigest(): Omit<ReminderSummary, 'channelResults'>
 	const needsAttention = all.filter((i) => !i.hasHandledGift);
 	const comingUp = all.filter((i) => i.hasHandledGift);
 	const packages = collectPackages();
-	const { subject } = composeDigest({ needsAttention, comingUp, packages, leadDays });
+	const pendingImports = collectPendingImports();
+	const { subject } = composeDigest({
+		needsAttention,
+		comingUp,
+		packages,
+		pendingImports,
+		leadDays
+	});
 	return {
 		leadDays,
 		needsAttention,
 		comingUp,
 		packagesInTransit: packages,
+		pendingImports,
 		notifiedSubject: subject
 	};
 }
