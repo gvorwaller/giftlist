@@ -1,6 +1,6 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { getGiftWithContext } from '$server/gifts';
+import { archiveGift, getGiftWithContext } from '$server/gifts';
 import { transitionGift, canTransition } from '$server/gift-status';
 import { recordView } from '$server/recently-viewed';
 import type { GiftStatus } from '$server/types';
@@ -67,5 +67,17 @@ export const actions: Actions = {
 	markReturned: ({ params, locals }) => {
 		if (!locals.user) throw redirect(303, '/login');
 		return doTransition(params, 'returned', locals.user.id);
+	},
+	archive: ({ params, locals }) => {
+		if (!locals.user) throw redirect(303, '/login');
+		const gift = requireGift(params);
+		archiveGift(gift.id, true, locals.user.id);
+		throw redirect(303, `/app/gifts/${gift.id}`);
+	},
+	unarchive: ({ params, locals }) => {
+		if (!locals.user) throw redirect(303, '/login');
+		const gift = requireGift(params);
+		archiveGift(gift.id, false, locals.user.id);
+		throw redirect(303, `/app/gifts/${gift.id}`);
 	}
 };

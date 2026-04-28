@@ -18,6 +18,9 @@
 	const next = $derived(nextForwardStatus(data.gift.status));
 	const nextLabel = $derived(forwardActionLabel(data.gift.status));
 	const returnable = $derived(canReturn(data.gift.status));
+	const isArchived = $derived(data.gift.is_archived === 1);
+
+	let confirmingArchive = $state(false);
 
 	function formAction(to: NonNullable<ReturnType<typeof nextForwardStatus>> | 'returned'): string {
 		switch (to) {
@@ -108,29 +111,36 @@
 		<p class="error" role="alert">{form.error}</p>
 	{/if}
 
-	{#if next && nextLabel}
-		<form method="POST" action={formAction(next)} class="primary-action">
-			<button type="submit" class="primary-btn">{nextLabel}</button>
-		</form>
+	{#if isArchived}
+		<section class="card archived-banner" role="status">
+			<p class="eyebrow">Archived</p>
+			<p class="body">This gift is archived and hidden from the main lists. Restore to bring it back.</p>
+		</section>
 	{:else}
-		<p class="done">
-			{#if data.gift.status === 'given'}
-				All done — this one is given.
-			{:else if data.gift.status === 'returned'}
-				Returned.
-			{/if}
+		{#if next && nextLabel}
+			<form method="POST" action={formAction(next)} class="primary-action">
+				<button type="submit" class="primary-btn">{nextLabel}</button>
+			</form>
+		{:else}
+			<p class="done">
+				{#if data.gift.status === 'given'}
+					All done — this one is given.
+				{:else if data.gift.status === 'returned'}
+					Returned.
+				{/if}
+			</p>
+		{/if}
+
+		{#if returnable}
+			<form method="POST" action="?/markReturned" class="secondary-action">
+				<button type="submit" class="ghost danger">Mark Returned</button>
+			</form>
+		{/if}
+
+		<p class="edit-link">
+			<a href="/app/gifts/{data.gift.id}/edit">Edit details</a>
 		</p>
 	{/if}
-
-	{#if returnable}
-		<form method="POST" action="?/markReturned" class="secondary-action">
-			<button type="submit" class="ghost danger">Mark Returned</button>
-		</form>
-	{/if}
-
-	<p class="edit-link">
-		<a href="/app/gifts/{data.gift.id}/edit">Edit details</a>
-	</p>
 
 	{#if data.gift.tracking_number}
 		<section class="card">
@@ -162,6 +172,41 @@
 				<li>Arrived {formatTimestamp(data.gift.delivered_at)}</li>
 			{/if}
 		</ul>
+	</section>
+
+	<section class="card danger-zone">
+		<h2>{isArchived ? 'Restore' : 'Archive'}</h2>
+		{#if isArchived}
+			<p>Bring this gift back into the main list.</p>
+			<form method="POST" action="?/unarchive">
+				<button type="submit" class="primary-btn">Restore this gift</button>
+			</form>
+		{:else if confirmingArchive}
+			<p>Archive hides this gift from the main list. You can restore it later.</p>
+			<form method="POST" action="?/archive" class="confirm-row">
+				<button
+					type="button"
+					class="ghost"
+					onclick={() => {
+						confirmingArchive = false;
+					}}
+				>
+					Cancel
+				</button>
+				<button type="submit" class="danger-btn">Yes, archive</button>
+			</form>
+		{:else}
+			<p>Archive hides this gift from the main list. It can be restored later.</p>
+			<button
+				type="button"
+				class="ghost danger"
+				onclick={() => {
+					confirmingArchive = true;
+				}}
+			>
+				Archive this gift
+			</button>
+		{/if}
 	</section>
 </main>
 
@@ -367,5 +412,51 @@
 		font-family: var(--font-sans);
 		font-size: 14px;
 		color: var(--muted);
+	}
+
+	.archived-banner {
+		background: var(--amber-soft);
+		border-color: var(--amber);
+	}
+
+	.archived-banner .eyebrow {
+		color: var(--amber);
+	}
+
+	.danger-zone {
+		margin-top: 14px;
+		border-color: #e7d8bc;
+	}
+
+	.danger-zone h2 {
+		font-family: var(--font-serif);
+		font-size: 20px;
+		margin-bottom: 8px;
+	}
+
+	.danger-zone p {
+		font-family: var(--font-sans);
+		font-size: 14px;
+		color: var(--muted);
+		margin-bottom: 12px;
+	}
+
+	.confirm-row {
+		display: flex;
+		gap: 10px;
+		justify-content: flex-end;
+	}
+
+	.danger-btn {
+		min-height: var(--tap-target);
+		padding: 10px 20px;
+		background: var(--rose);
+		color: var(--paper);
+		border: 1px solid var(--rose);
+		border-radius: var(--radius-control);
+		font-family: var(--font-sans);
+		font-size: 15px;
+		font-weight: 600;
+		cursor: pointer;
 	}
 </style>
