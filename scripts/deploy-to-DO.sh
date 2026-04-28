@@ -104,7 +104,15 @@ echo "==> Pre-deploy DB snapshot"
 mkdir -p data/backup
 SNAP_FILE="data/backup/pre-deploy-\$(date -u +%Y-%m-%dT%H%M%SZ).db"
 if [[ -f data/gifttracker.db ]]; then
-  /usr/bin/sqlite3 -bail data/gifttracker.db ".backup '\${SNAP_FILE}'"
+  # Use better-sqlite3 (already in node_modules) for the online backup API.
+  # No sqlite3 CLI dependency on the host. .backup() acquires a read txn and
+  # copies pages without blocking writers.
+  node -e "
+    const Database = require('better-sqlite3');
+    const db = new Database('data/gifttracker.db', { readonly: true });
+    db.backup('\${SNAP_FILE}').then(() => { db.close(); process.exit(0); })
+      .catch(e => { console.error(e); process.exit(1); });
+  "
   echo "    snapshot: \${SNAP_FILE} (\$(stat -c%s "\${SNAP_FILE}") bytes)"
 else
   echo "    no DB yet — first deploy"
