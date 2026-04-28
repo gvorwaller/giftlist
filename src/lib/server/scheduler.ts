@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { runReminderJob } from './jobs/reminders';
 import { runAmazonScan, runProcessedCleanup } from './jobs/amazon-import';
+import { runChristmasKickoffJob } from './jobs/christmas-kickoff';
 import { getDb } from './db';
 
 /**
@@ -19,7 +20,8 @@ let started = false;
 const DEFAULTS = {
 	reminders: '0 8 * * *', // 08:00 daily
 	amazonScan: '30 7 * * *', // 07:30 daily, before reminders so the digest sees fresh pending counts
-	cleanup: '15 3 * * 0' // 03:15 Sundays
+	cleanup: '15 3 * * 0', // 03:15 Sundays
+	christmasKickoff: '0 8 1 9 *' // Sept 1 at 08:00 — wife's gift-shopping kickoff
 };
 
 function isEnabled(): boolean {
@@ -91,4 +93,15 @@ export function startScheduler(): void {
 		}
 	});
 	console.log(`[scheduler] registered amazon.cleanup_processed (${cleanupCron})`);
+
+	const christmasKickoffCron = expr('CHRISTMAS_KICKOFF_CRON', DEFAULTS.christmasKickoff);
+	cron.schedule(christmasKickoffCron, async () => {
+		console.log('[cron] christmas.kickoff firing');
+		try {
+			await runChristmasKickoffJob();
+		} catch (err) {
+			console.error('[cron] christmas.kickoff failed:', err);
+		}
+	});
+	console.log(`[scheduler] registered christmas.kickoff (${christmasKickoffCron})`);
 }

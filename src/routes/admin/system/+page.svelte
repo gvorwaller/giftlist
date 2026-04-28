@@ -111,6 +111,34 @@
 	</section>
 
 	<section class="card">
+		<p class="eyebrow">Christmas planning kickoff</p>
+		<div class="row">
+			<div>
+				<p class="body">
+					Fires Sept 1 each year. A focused heads-up — not folded into the daily digest —
+					so gift planning starts before shopping does.
+				</p>
+				{#if data.christmasJob.lastRun}
+					<p class="muted">
+						Last run: {formatTimestamp(data.christmasJob.lastRun.started_at)}
+						· <strong class={statusClass(data.christmasJob.lastRun.status)}>
+							{data.christmasJob.lastRun.status}
+						</strong>
+					</p>
+					{#if data.christmasJob.lastRun.summary}
+						<p class="muted">{data.christmasJob.lastRun.summary}</p>
+					{/if}
+				{:else}
+					<p class="muted">Never run yet.</p>
+				{/if}
+			</div>
+			<form method="POST" action="?/runChristmasKickoffNow">
+				<button type="submit" class="primary">Run kickoff now</button>
+			</form>
+		</div>
+	</section>
+
+	<section class="card">
 		<p class="eyebrow">Recent job runs</p>
 		{#if data.recentRuns.length === 0}
 			<p class="muted">No jobs have run yet.</p>
