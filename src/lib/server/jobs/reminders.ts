@@ -120,7 +120,10 @@ function collectUpcoming(leadDays: number): UpcomingItem[] {
 
 	const today = new Date();
 	const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-	const cutoff = todayStart.getTime() + leadDays * 86_400_000;
+	// Per-occasion override: each occasion can extend the global lead time
+	// via occasions.reminder_days. We use max(globalLead, perOccasionLead)
+	// so an occasion never collapses below the global default but can
+	// surface earlier (e.g., 116 days for Christmas) when set higher.
 
 	const results: UpcomingItem[] = [];
 	const handledCountStmt = db.prepare<
@@ -150,7 +153,10 @@ function collectUpcoming(leadDays: number): UpcomingItem[] {
 			updated_at: r.updated_at
 		};
 		const next = nextOccurrenceDate(occasion, todayStart);
-		if (!next || next.getTime() > cutoff) continue;
+		if (!next) continue;
+		const effectiveLead = Math.max(leadDays, occasion.reminder_days || 0);
+		const cutoff = todayStart.getTime() + effectiveLead * 86_400_000;
+		if (next.getTime() > cutoff) continue;
 		const daysUntil = Math.round((next.getTime() - todayStart.getTime()) / 86_400_000);
 		const turnsAge =
 			(occasion.kind === 'birthday' || occasion.kind === 'anniversary') && occasion.year != null

@@ -60,6 +60,79 @@ export function createOccasion(input: CreateOccasionInput): Occasion {
 	return getOccasionById(Number(info.lastInsertRowid))!;
 }
 
+export interface UpdateOccasionInput {
+	title?: string;
+	kind?: OccasionKind;
+	recurrence?: OccasionRecurrence;
+	month?: number | null;
+	day?: number | null;
+	date?: string | null;
+	reminder_days?: number;
+	year?: number | null;
+}
+
+export function updateOccasion(id: number, input: UpdateOccasionInput): Occasion {
+	const db = getDb();
+	const before = getOccasionById(id);
+	if (!before) throw new Error(`Occasion ${id} not found`);
+
+	const next = {
+		title: input.title ?? before.title,
+		kind: input.kind ?? before.kind,
+		recurrence: input.recurrence ?? before.recurrence,
+		month: input.month !== undefined ? input.month : before.month,
+		day: input.day !== undefined ? input.day : before.day,
+		date: input.date !== undefined ? input.date : before.date,
+		reminder_days: input.reminder_days ?? before.reminder_days,
+		year: input.year !== undefined ? input.year : before.year
+	};
+
+	db.prepare(
+		`UPDATE occasions
+		    SET title = ?, kind = ?, recurrence = ?, month = ?, day = ?, date = ?,
+		        reminder_days = ?, year = ?, updated_at = CURRENT_TIMESTAMP
+		  WHERE id = ?`
+	).run(
+		next.title,
+		next.kind,
+		next.recurrence,
+		next.month,
+		next.day,
+		next.date,
+		next.reminder_days,
+		next.year,
+		id
+	);
+
+	return getOccasionById(id)!;
+}
+
+/**
+ * Counts how many active person_occasions reference this occasion. Used by
+ * the admin UI to warn before deleting an occasion that's in use.
+ */
+export function countAssignmentsForOccasion(occasionId: number): number {
+	const db = getDb();
+	const row = db
+		.prepare<[number], { cnt: number }>(
+			`SELECT COUNT(*) AS cnt FROM person_occasions WHERE occasion_id = ? AND is_active = 1`
+		)
+		.get(occasionId);
+	return row?.cnt ?? 0;
+}
+
+/**
+ * Hard-deletes an occasion. person_occasions cascades automatically
+ * (ON DELETE CASCADE); gifts.occasion_id is set to NULL (ON DELETE SET NULL)
+ * — gifts survive, just lose their occasion link. Returns true if a row
+ * was deleted.
+ */
+export function deleteOccasion(occasionId: number): boolean {
+	const db = getDb();
+	const result = db.prepare(`DELETE FROM occasions WHERE id = ?`).run(occasionId);
+	return result.changes > 0;
+}
+
 /** Convenience: create a per-person birthday occasion + link it. */
 export function createPersonBirthday(
 	personId: number,

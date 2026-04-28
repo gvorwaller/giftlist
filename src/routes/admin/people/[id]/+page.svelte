@@ -192,6 +192,54 @@
 					<button type="submit" class="primary">Assign</button>
 				</form>
 			</details>
+
+			<details class="add-block">
+				<summary>Add custom occasion (anniversary, name day, …)</summary>
+				<form method="POST" action="?/addCustom" class="inline-form">
+					<label>
+						<span>Title</span>
+						<input
+							name="title"
+							type="text"
+							placeholder="Wedding anniversary, name day, special date"
+							required
+						/>
+					</label>
+					<label class="recur-label">
+						<span>Recurrence</span>
+						<select name="recurrence">
+							<option value="annual">Annual (same date each year)</option>
+							<option value="one_time">One-time</option>
+						</select>
+					</label>
+					<div class="row">
+						<label>
+							<span>Month (annual only)</span>
+							<input name="month" type="number" min="1" max="12" />
+						</label>
+						<label>
+							<span>Day (annual only)</span>
+							<input name="day" type="number" min="1" max="31" />
+						</label>
+					</div>
+					<label>
+						<span>Date (one-time only)</span>
+						<input name="date" type="date" />
+					</label>
+					<label>
+						<span>Reminder lead (days)</span>
+						<input name="reminder_days" type="number" min="1" max="365" value="21" />
+					</label>
+					<label>
+						<span>Note (optional)</span>
+						<input name="notes" type="text" placeholder="Anniversary of marriage" />
+					</label>
+					{#if form?.scope === 'custom' && form.error}
+						<p class="error" role="alert">{form.error}</p>
+					{/if}
+					<button type="submit" class="primary">Save occasion</button>
+				</form>
+			</details>
 		</div>
 	</section>
 
