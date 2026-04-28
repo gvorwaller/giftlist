@@ -125,12 +125,20 @@ npm run build 2>&1 | tail -5
 echo "==> pm2 restart ${PM2_APP}"
 pm2 restart "${PM2_APP}" --update-env 2>&1 | tail -2
 
-echo "==> Waiting for boot (3s)"
-sleep 3
-
-echo "==> Health check (local)"
-HEALTH_RESP="\$(curl -fsS "${HEALTH_URL}")" || { echo "Health check failed"; pm2 logs ${PM2_APP} --lines 30 --nostream; exit 1; }
-echo "    \${HEALTH_RESP}"
+echo "==> Health check (local, retry up to 20s)"
+HEALTH_RESP=""
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if HEALTH_RESP="\$(curl -fsS "${HEALTH_URL}" 2>/dev/null)"; then
+    echo "    [\${i}/10] \${HEALTH_RESP}"
+    break
+  fi
+  sleep 2
+done
+if [[ -z "\${HEALTH_RESP}" ]]; then
+  echo "Health check failed after 20s"
+  pm2 logs ${PM2_APP} --lines 30 --nostream
+  exit 1
+fi
 
 echo "==> Recent pm2 output"
 tail -10 /var/log/pm2/${PM2_APP}-out.log
