@@ -19,6 +19,7 @@ export interface GiftCreateInput {
 }
 
 export interface GiftUpdateInput {
+	person_id?: number;
 	title?: string;
 	source?: string | null;
 	source_url?: string | null;
@@ -130,6 +131,7 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 	const db = getDb();
 	const merged: Gift = { ...before };
 	const columns: (keyof GiftUpdateInput)[] = [
+		'person_id',
 		'title',
 		'source',
 		'source_url',
@@ -149,13 +151,29 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 			(merged as unknown as Record<string, unknown>)[col] = next;
 		}
 	}
+
+	// If reassigning to a new person, clear occasion_id unless caller is
+	// explicitly setting one — occasions are linked to a specific person
+	// via person_occasions, so the prior occasion may not apply.
+	if (
+		'person_id' in input &&
+		merged.person_id !== before.person_id &&
+		!('occasion_id' in input)
+	) {
+		merged.occasion_id = null;
+		if (before.occasion_id !== null && !changed.includes('occasion_id')) {
+			changed.push('occasion_id');
+		}
+	}
+
 	db.prepare(
 		`UPDATE gifts SET
-		    title = ?, source = ?, source_url = ?, occasion_id = ?, occasion_year = ?,
+		    person_id = ?, title = ?, source = ?, source_url = ?, occasion_id = ?, occasion_year = ?,
 		    order_id = ?, tracking_number = ?, carrier = ?, price_cents = ?, notes = ?,
 		    updated_at = CURRENT_TIMESTAMP
 		  WHERE id = ?`
 	).run(
+		merged.person_id,
 		merged.title,
 		merged.source,
 		merged.source_url,
@@ -169,15 +187,34 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 		id
 	);
 	const after = getGiftById(id)!;
+
+	let summary: string;
+	if (changed.length === 0) {
+		summary = `Updated "${after.title}" (no field changes)`;
+	} else if (changed.includes('person_id')) {
+		const fromName = db
+			.prepare<[number], { display_name: string }>(
+				'SELECT display_name FROM people WHERE id = ?'
+			)
+			.get(before.person_id)?.display_name ?? `person ${before.person_id}`;
+		const toName = db
+			.prepare<[number], { display_name: string }>(
+				'SELECT display_name FROM people WHERE id = ?'
+			)
+			.get(after.person_id)?.display_name ?? `person ${after.person_id}`;
+		const others = changed.filter((c) => c !== 'person_id');
+		const tail = others.length > 0 ? `; also ${others.join(', ')}` : '';
+		summary = `Reassigned "${after.title}" from ${fromName} to ${toName}${tail}`;
+	} else {
+		summary = `Updated "${after.title}": ${changed.join(', ')}`;
+	}
+
 	logAudit({
 		actorUserId,
 		entityType: 'gift',
 		entityId: id,
 		action: 'update',
-		summary:
-			changed.length > 0
-				? `Updated "${after.title}": ${changed.join(', ')}`
-				: `Updated "${after.title}" (no field changes)`
+		summary
 	});
 	return after;
 }

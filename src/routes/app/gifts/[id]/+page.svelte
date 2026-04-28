@@ -128,6 +128,10 @@
 		</form>
 	{/if}
 
+	<p class="edit-link">
+		<a href="/app/gifts/{data.gift.id}/edit">Edit details</a>
+	</p>
+
 	{#if data.gift.tracking_number}
 		<section class="card">
 			<p class="eyebrow">Tracking</p>
@@ -327,6 +331,23 @@
 		color: var(--muted);
 		padding: 14px 0;
 		text-align: center;
+	}
+
+	.edit-link {
+		text-align: center;
+		margin: 6px 0 14px;
+	}
+
+	.edit-link a {
+		font-family: var(--font-sans);
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--green);
+		text-decoration: underline;
+		padding: 8px 12px;
+		display: inline-block;
+		min-height: var(--tap-target);
+		line-height: 32px;
 	}
 
 	.error {
