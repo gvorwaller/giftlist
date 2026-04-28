@@ -94,6 +94,38 @@
 			</p>
 		</section>
 
+		{#if data.recentRuns.length > 1}
+			<section class="card">
+				<p class="eyebrow">Recent runs ({data.recentRuns.length})</p>
+				<ul class="run-list">
+					{#each data.recentRuns as r (r.id)}
+						<li>
+							<a href="/admin/imports/amazon/review?run={r.id}" class="run-row">
+								<div class="run-meta">
+									<span class="run-time">{formatTimestamp(r.started_at)}</span>
+									<span class="run-status status-{r.status}">{r.status}</span>
+								</div>
+								<div class="run-counts">
+									{#if r.pending_count > 0}
+										<span class="count count-pending">{r.pending_count} pending</span>
+									{/if}
+									{#if r.failed_count > 0}
+										<span class="count count-failed">{r.failed_count} failed</span>
+									{/if}
+									{#if r.accepted_count > 0}
+										<span class="count count-ok">{r.accepted_count} accepted</span>
+									{/if}
+									{#if r.pending_count === 0 && r.failed_count === 0 && r.accepted_count === 0}
+										<span class="count count-empty">no rows</span>
+									{/if}
+								</div>
+							</a>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
+
 		{#if data.latestRun}
 			<section class="card">
 				<p class="eyebrow">Latest run</p>
@@ -283,4 +315,77 @@
 		border-radius: var(--radius-control);
 		color: var(--ink);
 	}
+
+	.run-list {
+		list-style: none;
+		padding: 0;
+		margin: 8px 0 0;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.run-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		padding: 12px 14px;
+		background: var(--bg);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		text-decoration: none;
+		color: var(--ink);
+		min-height: var(--tap-target);
+	}
+
+	.run-row:hover {
+		border-color: var(--green);
+	}
+
+	.run-meta {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.run-time {
+		font-family: var(--font-sans);
+		font-size: 14px;
+		color: var(--ink);
+	}
+
+	.run-status {
+		font-family: var(--font-sans);
+		font-size: 11px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--muted);
+	}
+
+	.status-running { color: var(--amber); }
+	.status-error { color: var(--rose); }
+	.status-committed { color: var(--green); }
+
+	.run-counts {
+		display: flex;
+		gap: 6px;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+
+	.count {
+		font-family: var(--font-sans);
+		font-size: 12px;
+		font-weight: 600;
+		padding: 3px 8px;
+		border-radius: var(--radius-pill);
+		white-space: nowrap;
+	}
+
+	.count-pending { background: var(--amber-soft); color: var(--amber); }
+	.count-failed { background: #fde9e6; color: var(--rose); }
+	.count-ok { background: var(--green-soft); color: var(--green); }
+	.count-empty { color: var(--muted); }
 </style>

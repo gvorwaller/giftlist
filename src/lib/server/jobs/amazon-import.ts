@@ -489,3 +489,30 @@ export function getLatestRun(): ImportRun | undefined {
 		)
 		.get();
 }
+
+export interface RecentRunSummary extends ImportRun {
+	pending_count: number;
+	failed_count: number;
+	accepted_count: number;
+}
+
+/**
+ * Most-recent N runs with at-a-glance per-disposition counts.
+ * Used by the imports landing page so admins can find a past review without
+ * memorizing run ids.
+ */
+export function listRecentRuns(limit = 20): RecentRunSummary[] {
+	const db = getDb();
+	return db
+		.prepare<[number], RecentRunSummary>(
+			`SELECT r.*,
+			        (SELECT COUNT(*) FROM import_rows WHERE import_run_id = r.id AND disposition = 'pending') AS pending_count,
+			        (SELECT COUNT(*) FROM import_rows WHERE import_run_id = r.id AND disposition = 'failed') AS failed_count,
+			        (SELECT COUNT(*) FROM import_rows WHERE import_run_id = r.id AND disposition = 'accepted') AS accepted_count
+			   FROM import_runs r
+			  WHERE r.source = 'amazon_email'
+			  ORDER BY r.started_at DESC
+			  LIMIT ?`
+		)
+		.all(limit);
+}

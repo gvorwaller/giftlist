@@ -2,7 +2,12 @@ import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { getDecryptedToken, getTokenRow } from '$server/external-tokens';
 import { tokenHasGmailModify } from '$server/google-auth';
-import { getLatestRun, listRowsForRun, runAmazonScan } from '$server/jobs/amazon-import';
+import {
+	getLatestRun,
+	listRecentRuns,
+	listRowsForRun,
+	runAmazonScan
+} from '$server/jobs/amazon-import';
 
 export const load: PageServerLoad = ({ locals }) => {
 	if (!locals.user) throw redirect(303, '/login');
@@ -20,6 +25,8 @@ export const load: PageServerLoad = ({ locals }) => {
 		? Math.max(0, latestRun.fetched_count - latestRun.parsed_count)
 		: 0;
 
+	const recentRuns = listRecentRuns(20);
+
 	return {
 		connected: Boolean(token && token.refresh_token_encrypted),
 		scopeOk,
@@ -27,7 +34,8 @@ export const load: PageServerLoad = ({ locals }) => {
 		latestRun,
 		pendingCount,
 		autoSkippedCount,
-		alreadyStaged
+		alreadyStaged,
+		recentRuns
 	};
 };
 

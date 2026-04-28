@@ -98,5 +98,28 @@ export const actions: Actions = {
 			303,
 			`/admin/imports/amazon/review?run=${runId}&skipped=${result.rowsSkipped}`
 		);
+	},
+
+	// Re-process a previously failed or skipped row with a manually chosen recipient.
+	// commitReviewedRows doesn't gate on current disposition, so we just call accept
+	// with the chosen personId and it overwrites the row's disposition + creates the gift.
+	reassign: async ({ locals, request }) => {
+		if (!locals.user) throw redirect(303, '/login');
+		const fd = await request.formData();
+		const runId = Number(fd.get('run_id'));
+		const rowId = Number(fd.get('row_id'));
+		const personId = Number(fd.get('person_id'));
+		const saveAsAlias = fd.get('alias') === 'on';
+		if (!Number.isFinite(runId) || !Number.isFinite(rowId) || !Number.isFinite(personId) || personId <= 0) {
+			return fail(400, { error: 'Missing run id, row id, or recipient.' });
+		}
+		const result = await commitReviewedRows(locals.user.id, [
+			{ rowId, action: 'accept', assignedPersonId: personId, saveAsAlias }
+		]);
+		const qs = new URLSearchParams();
+		qs.set('run', String(runId));
+		qs.set('reassigned', String(result.giftsCreated > 0 ? 1 : 0));
+		if (result.rowsFailed > 0) qs.set('failed', String(result.rowsFailed));
+		throw redirect(303, `/admin/imports/amazon/review?${qs.toString()}`);
 	}
 };

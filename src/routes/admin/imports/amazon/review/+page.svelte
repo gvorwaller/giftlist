@@ -34,11 +34,17 @@
 	const handled = $derived(data.rows.filter((r) => r.disposition !== 'pending'));
 
 	let confirmingSkipAll = $state(false);
+	let expandedHandledRowId = $state<number | null>(null);
+
+	function priceDollarsOrEmpty(c: number | null | undefined): string {
+		return c == null ? '' : `$${(c / 100).toFixed(2)}`;
+	}
 
 	const flashGifts = $derived(Number($page.url.searchParams.get('gifts') ?? '0'));
 	const flashSkipped = $derived(Number($page.url.searchParams.get('skipped') ?? '0'));
 	const flashFailed = $derived(Number($page.url.searchParams.get('failed') ?? '0'));
 	const flashMoveFails = $derived(Number($page.url.searchParams.get('move_failures') ?? '0'));
+	const flashReassigned = $derived(Number($page.url.searchParams.get('reassigned') ?? '0'));
 </script>
 
 <svelte:head>
@@ -67,6 +73,14 @@
 			{#if flashMoveFails > 0}
 				<br />{flashMoveFails} Gmail label moves failed (check logs).
 			{/if}
+		</div>
+	{:else if flashReassigned > 0}
+		<div class="flash ok" role="status">
+			Row reassigned and gift created.
+		</div>
+	{:else if flashFailed > 0}
+		<div class="flash err" role="alert">
+			Reassign failed: {flashFailed} row could not be created.
 		</div>
 	{/if}
 
@@ -227,14 +241,78 @@
 			<p class="eyebrow">Already handled in this run ({handled.length})</p>
 			<ul class="handled-list">
 				{#each handled.slice(0, 20) as r (r.id)}
-					<li class={r.disposition}>
-						<span class="tag">{r.disposition}</span>
-						{r.subject ?? '(no subject)'}
-						{#if r.gift_id}
-							· <a href="/app/gifts/{r.gift_id}">gift #{r.gift_id}</a>
-						{/if}
-						{#if r.error_message}
-							<span class="err-line">· {r.error_message}</span>
+					{@const reassignable = r.disposition === 'failed' || r.disposition === 'skipped'}
+					{@const expanded = expandedHandledRowId === r.id}
+					<li class="handled-li {r.disposition}">
+						<button
+							type="button"
+							class="handled-summary"
+							aria-expanded={expanded}
+							onclick={() => {
+								if (!reassignable) return;
+								expandedHandledRowId = expanded ? null : r.id;
+							}}
+							disabled={!reassignable}
+						>
+							<span class="tag">{r.disposition}</span>
+							<span class="handled-subject">{r.subject ?? '(no subject)'}</span>
+							{#if r.gift_id}
+								<span class="muted-inline">· <a href="/app/gifts/{r.gift_id}">gift #{r.gift_id}</a></span>
+							{/if}
+							{#if r.error_message}
+								<span class="err-line">· {r.error_message}</span>
+							{/if}
+							{#if reassignable}
+								<span class="caret" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+							{/if}
+						</button>
+
+						{#if expanded && reassignable}
+							<div class="handled-detail">
+								<dl class="row-kv">
+									{#if r.parsed_recipient_name}
+										<div><dt>Parsed recipient</dt><dd>{r.parsed_recipient_name}</dd></div>
+									{/if}
+									{#if r.parsed_title}
+										<div><dt>Item</dt><dd>{r.parsed_title}</dd></div>
+									{/if}
+									{#if r.parsed_order_id}
+										<div><dt>Order</dt><dd class="mono">{r.parsed_order_id}</dd></div>
+									{/if}
+									{#if r.parsed_price_cents != null}
+										<div><dt>Price</dt><dd>{priceDollarsOrEmpty(r.parsed_price_cents)}</dd></div>
+									{/if}
+									{#if r.parsed_shipping_address}
+										<div><dt>Ships to</dt><dd>{r.parsed_shipping_address}</dd></div>
+									{/if}
+									{#if r.parsed_gift_message}
+										<div><dt>Gift message</dt><dd>{r.parsed_gift_message}</dd></div>
+									{/if}
+								</dl>
+
+								<form method="POST" action="?/reassign" class="reassign-form">
+									<input type="hidden" name="run_id" value={data.run.id} />
+									<input type="hidden" name="row_id" value={r.id} />
+									<label class="reassign-row">
+										<span class="lbl">Assign to person</span>
+										<select name="person_id" required>
+											<option value="">— choose —</option>
+											{#each data.people as p (p.id)}
+												<option value={p.id}>{p.display_name}</option>
+											{/each}
+										</select>
+									</label>
+									{#if r.parsed_recipient_name}
+										<label class="alias">
+											<input type="checkbox" name="alias" />
+											<span>Remember "{r.parsed_recipient_name}" as an alias for this person</span>
+										</label>
+									{/if}
+									<div class="reassign-actions">
+										<button type="submit" class="primary">Reassign &amp; create gift</button>
+									</div>
+								</form>
+							</div>
 						{/if}
 					</li>
 				{/each}
@@ -502,4 +580,158 @@
 
 	.err-line { color: var(--rose); }
 	.more { font-style: italic; }
+
+	.handled-li {
+		display: flex;
+		flex-direction: column;
+		gap: 0;
+	}
+
+	.handled-summary {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-wrap: wrap;
+		text-align: left;
+		padding: 8px 0;
+		min-height: var(--tap-target);
+		background: transparent;
+		border: none;
+		font: inherit;
+		color: inherit;
+		cursor: pointer;
+	}
+
+	.handled-summary:disabled {
+		cursor: default;
+	}
+
+	.handled-summary:not(:disabled):hover .handled-subject {
+		color: var(--ink);
+	}
+
+	.handled-subject {
+		flex: 1 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.muted-inline {
+		color: var(--muted);
+		font-size: 13px;
+	}
+
+	.caret {
+		color: var(--muted);
+		font-size: 11px;
+		margin-left: 4px;
+	}
+
+	.handled-detail {
+		background: var(--bg);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		padding: 14px 16px;
+		margin: 6px 0 10px;
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.row-kv {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		margin: 0;
+	}
+
+	.row-kv > div {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.row-kv dt {
+		font-family: var(--font-sans);
+		font-size: 11px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--muted);
+	}
+
+	.row-kv dd {
+		font-family: var(--font-sans);
+		font-size: 14px;
+		color: var(--ink);
+	}
+
+	.row-kv .mono {
+		font-family: 'SF Mono', ui-monospace, monospace;
+		font-size: 13px;
+	}
+
+	.reassign-form {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+
+	.reassign-row {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.reassign-row .lbl {
+		font-family: var(--font-sans);
+		font-size: 11px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--muted);
+	}
+
+	.reassign-row select {
+		min-height: var(--tap-target);
+		padding: 8px 12px;
+		font-family: var(--font-sans);
+		font-size: 15px;
+		background: var(--paper);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		color: var(--ink);
+	}
+
+	.alias {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-family: var(--font-sans);
+		font-size: 14px;
+		color: var(--ink);
+	}
+
+	.reassign-actions {
+		display: flex;
+		gap: 10px;
+	}
+
+	.primary {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: var(--tap-target);
+		padding: 10px 18px;
+		background: var(--green);
+		color: var(--paper);
+		border: 1px solid var(--green);
+		border-radius: var(--radius-control);
+		font-family: var(--font-sans);
+		font-size: 15px;
+		font-weight: 600;
+		cursor: pointer;
+	}
 </style>
