@@ -7,6 +7,8 @@
 
 	let { data }: Props = $props();
 
+	let confirmingDisconnect = $state(false);
+
 	function scopeLabel(scope: string): string {
 		const names = scope
 			.split(/\s+/)
@@ -68,12 +70,38 @@
 					</dd>
 				</div>
 			</dl>
-			<div class="actions">
-				<a href="/admin/settings/google/connect" class="ghost">Re-connect</a>
-				<form method="POST" action="/admin/settings/google/disconnect">
-					<button type="submit" class="ghost danger">Disconnect</button>
-				</form>
-			</div>
+			{#if confirmingDisconnect}
+				<p class="confirm-prompt">
+					Disconnect Google? Contacts import and Amazon scans will stop working until you re-connect.
+				</p>
+				<div class="actions confirm-row">
+					<button
+						type="button"
+						class="ghost"
+						onclick={() => {
+							confirmingDisconnect = false;
+						}}
+					>
+						Cancel
+					</button>
+					<form method="POST" action="/admin/settings/google/disconnect">
+						<button type="submit" class="ghost danger">Yes, disconnect</button>
+					</form>
+				</div>
+			{:else}
+				<div class="actions">
+					<a href="/admin/settings/google/connect" class="ghost">Re-connect</a>
+					<button
+						type="button"
+						class="ghost danger"
+						onclick={() => {
+							confirmingDisconnect = true;
+						}}
+					>
+						Disconnect
+					</button>
+				</div>
+			{/if}
 		{:else}
 			<p class="body">Not connected yet.</p>
 			<div class="actions">
@@ -288,5 +316,19 @@
 
 	form {
 		display: inline;
+	}
+
+	.confirm-prompt {
+		font-size: 16px;
+		color: var(--ink);
+		background: var(--amber-soft);
+		border: 1px solid var(--amber);
+		border-radius: var(--radius-control);
+		padding: 14px 16px;
+		margin-bottom: 14px;
+	}
+
+	.confirm-row {
+		gap: 10px;
 	}
 </style>

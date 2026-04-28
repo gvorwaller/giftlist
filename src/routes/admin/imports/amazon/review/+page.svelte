@@ -33,6 +33,8 @@
 	const pending = $derived(data.rows.filter((r) => r.disposition === 'pending'));
 	const handled = $derived(data.rows.filter((r) => r.disposition !== 'pending'));
 
+	let confirmingSkipAll = $state(false);
+
 	const flashGifts = $derived(Number($page.url.searchParams.get('gifts') ?? '0'));
 	const flashSkipped = $derived(Number($page.url.searchParams.get('skipped') ?? '0'));
 	const flashFailed = $derived(Number($page.url.searchParams.get('failed') ?? '0'));
@@ -192,7 +194,30 @@
 
 			<div class="actions">
 				<button type="submit" class="primary">Commit selected</button>
-				<button type="submit" formaction="?/skipAll" class="ghost">Skip all pending</button>
+				{#if confirmingSkipAll}
+					<button
+						type="button"
+						class="ghost"
+						onclick={() => {
+							confirmingSkipAll = false;
+						}}
+					>
+						Cancel
+					</button>
+					<button type="submit" formaction="?/skipAll" class="ghost danger">
+						Yes, skip all {pending.length} pending
+					</button>
+				{:else}
+					<button
+						type="button"
+						class="ghost"
+						onclick={() => {
+							confirmingSkipAll = true;
+						}}
+					>
+						Skip all pending
+					</button>
+				{/if}
 			</div>
 		</form>
 	{/if}

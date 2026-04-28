@@ -9,6 +9,7 @@
 	let { data, form }: Props = $props();
 
 	let confirmingArchive = $state(false);
+	let confirmingRemoveOccasionId = $state<number | null>(null);
 
 	function monthName(m: number | null): string {
 		if (!m) return '';
@@ -111,12 +112,34 @@
 								{#if o.link_notes}<span class="notes"> · {o.link_notes}</span>{/if}
 							</p>
 						</div>
-						<form method="POST" action="?/removeOccasion">
-							<input type="hidden" name="person_occasion_id" value={o.personOccasionId} />
-							<button type="submit" class="ghost danger" aria-label="Remove {o.title}">
+						{#if confirmingRemoveOccasionId === o.personOccasionId}
+							<div class="occ-confirm">
+								<button
+									type="button"
+									class="ghost"
+									onclick={() => {
+										confirmingRemoveOccasionId = null;
+									}}
+								>
+									Cancel
+								</button>
+								<form method="POST" action="?/removeOccasion">
+									<input type="hidden" name="person_occasion_id" value={o.personOccasionId} />
+									<button type="submit" class="ghost danger">Yes, remove</button>
+								</form>
+							</div>
+						{:else}
+							<button
+								type="button"
+								class="ghost danger"
+								aria-label="Remove {o.title}"
+								onclick={() => {
+									confirmingRemoveOccasionId = o.personOccasionId;
+								}}
+							>
 								Remove
 							</button>
-						</form>
+						{/if}
 					</li>
 				{/each}
 			</ul>
@@ -390,6 +413,12 @@
 
 	.occ-main .notes {
 		text-transform: none;
+	}
+
+	.occ-confirm {
+		display: flex;
+		gap: 8px;
+		align-items: center;
 	}
 
 	.empty {
