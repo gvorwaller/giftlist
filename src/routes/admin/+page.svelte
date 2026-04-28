@@ -206,6 +206,7 @@
 			<a href="/admin/imports" class="quick-btn">Imports</a>
 			<a href="/admin/settings" class="quick-btn">Settings</a>
 			<a href="/admin/system" class="quick-btn">System &amp; jobs</a>
+			<a href="/admin/audit" class="quick-btn">Audit log</a>
 		</div>
 	</section>
 </main>

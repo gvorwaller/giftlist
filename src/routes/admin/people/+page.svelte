@@ -1,11 +1,31 @@
 <script lang="ts">
-	import type { PageData } from './$types';
+	import type { ActionData, PageData } from './$types';
 
 	interface Props {
 		data: PageData;
+		form: ActionData;
 	}
 
-	let { data }: Props = $props();
+	let { data, form }: Props = $props();
+
+	let selectMode = $state(false);
+	let selected = $state(new Set<number>());
+
+	function toggleSelected(id: number) {
+		const next = new Set(selected);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		selected = next;
+	}
+
+	function clearSelection() {
+		selected = new Set();
+	}
+
+	function exitSelectMode() {
+		selectMode = false;
+		clearSelection();
+	}
 </script>
 
 <svelte:head>
@@ -49,9 +69,27 @@
 			<a class="toggle" href={data.includeArchived ? '?' : '?archived=1'}>
 				{data.includeArchived ? 'Hide archived' : 'Show archived'}
 			</a>
+			<button
+				type="button"
+				class="toggle"
+				onclick={() => {
+					if (selectMode) exitSelectMode();
+					else selectMode = true;
+				}}
+			>
+				{selectMode ? 'Exit select' : 'Select multiple'}
+			</button>
 			<a class="primary" href="/admin/people/new">Add person</a>
 		</div>
 	</div>
+
+	{#if form?.scope === 'bulk' && form.ok}
+		<div class="flash ok" role="status">
+			Assigned occasion to {form.count} {form.count === 1 ? 'person' : 'people'}.
+		</div>
+	{:else if form?.scope === 'bulk' && form.error}
+		<div class="flash err" role="alert">{form.error}</div>
+	{/if}
 
 	{#if data.people.length === 0}
 		<div class="empty">
@@ -62,9 +100,19 @@
 			</p>
 		</div>
 	{:else}
-		<ul class="list">
+		<ul class="list" class:select-mode={selectMode}>
 			{#each data.people as person (person.id)}
-				<li>
+				<li class="row-li">
+					{#if selectMode}
+						<label class="select-cell">
+							<input
+								type="checkbox"
+								checked={selected.has(person.id)}
+								onchange={() => toggleSelected(person.id)}
+								aria-label="Select {person.display_name}"
+							/>
+						</label>
+					{/if}
 					<a class="row" class:archived={person.is_archived === 1} href="/admin/people/{person.id}">
 						<div class="row-main">
 							<p class="name">{person.display_name}</p>
@@ -99,6 +147,26 @@
 				</li>
 			{/each}
 		</ul>
+	{/if}
+
+	{#if selectMode && selected.size > 0}
+		<form method="POST" action="?/bulkAssignOccasion" class="bulk-bar">
+			{#each [...selected] as id (id)}
+				<input type="hidden" name="person_ids" value={id} />
+			{/each}
+			<span class="bulk-count">{selected.size} selected</span>
+			<label class="bulk-occ">
+				<span class="sr">Occasion</span>
+				<select name="occasion_id" required>
+					<option value="">Choose occasion…</option>
+					{#each data.sharedOccasions as o (o.id)}
+						<option value={o.id}>{o.title}</option>
+					{/each}
+				</select>
+			</label>
+			<button type="submit" class="primary">Assign</button>
+			<button type="button" class="ghost" onclick={clearSelection}>Clear</button>
+		</form>
 	{/if}
 </main>
 
@@ -293,5 +361,84 @@
 	.archived-badge {
 		background: var(--line);
 		color: var(--muted);
+	}
+
+	.row-li {
+		display: flex;
+		align-items: stretch;
+		gap: 10px;
+	}
+
+	.list.select-mode .row-li > .row {
+		flex: 1 1 auto;
+	}
+
+	.select-cell {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-width: var(--tap-target);
+		min-height: var(--tap-target);
+		padding: 0 6px;
+		background: var(--paper);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		cursor: pointer;
+	}
+
+	.select-cell input[type='checkbox'] {
+		width: 22px;
+		height: 22px;
+	}
+
+	.flash {
+		padding: 12px 16px;
+		border-radius: var(--radius-control);
+		margin-bottom: 12px;
+		font-family: var(--font-sans);
+		font-size: 15px;
+	}
+
+	.flash.ok { background: var(--green-soft); color: var(--green); border: 1px solid var(--green); }
+	.flash.err { background: #fde9e6; color: var(--rose); border: 1px solid var(--rose); }
+
+	.bulk-bar {
+		position: fixed;
+		left: 0;
+		right: 0;
+		/* Above SignedInBar (which sits above BottomNav). */
+		bottom: calc(var(--tap-target) + 16px + env(safe-area-inset-bottom) + 56px);
+		background: var(--paper);
+		border-top: 1px solid var(--line);
+		box-shadow: 0 -4px 14px rgba(47, 35, 18, 0.08);
+		padding: 12px 18px;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
+		z-index: 18;
+	}
+
+	.bulk-count {
+		font-family: var(--font-sans);
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--green);
+	}
+
+	.bulk-occ {
+		flex: 1 1 200px;
+	}
+
+	.bulk-occ select {
+		width: 100%;
+		min-height: var(--tap-target);
+		padding: 8px 12px;
+		font-family: var(--font-sans);
+		font-size: 15px;
+		background: var(--bg);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		color: var(--ink);
 	}
 </style>
