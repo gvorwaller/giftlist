@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Produces a consistent snapshot of the SQLite database using SQLite's online
 # backup API. Safe to run while the app is serving requests — the .backup
 # command acquires a read transaction and copies pages without blocking writers.
@@ -19,6 +19,10 @@
 
 set -euo pipefail
 
+# CCC may invoke us with a stripped PATH. Set a known-good one so /usr/bin
+# tools resolve without depending on caller's environment.
+export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
 # Resolve the project root relative to this script so CCC can invoke it via
 # any working directory.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,6 +32,19 @@ SRC_DB="${PROJECT_ROOT}/data/gifttracker.db"
 BACKUP_DIR="${PROJECT_ROOT}/data/backup"
 DEST_DB="${BACKUP_DIR}/gifttracker.db"
 
+# Tee everything to a log file so CCC failures can be diagnosed after the
+# fact — CCC's "Errors" tab only surfaces the wrapper message, not actual
+# script stderr. Log path is fixed so it's easy to find.
+LOG_FILE="${BACKUP_DIR}/preflight.log"
+mkdir -p "${BACKUP_DIR}"
+{
+  echo "===== $(/bin/date -u +%Y-%m-%dT%H:%M:%SZ) preflight start ====="
+  echo "uid=$EUID user=$(/usr/bin/id -un 2>/dev/null || echo ?) home=${HOME:-?} pwd=$(pwd)"
+  echo "path=${PATH:-?}"
+  echo "args=$*"
+} >> "${LOG_FILE}"
+exec > >(/usr/bin/tee -a "${LOG_FILE}") 2> >(/usr/bin/tee -a "${LOG_FILE}" >&2)
+
 PROD_BACKUP_DIR="${BACKUP_DIR}/prod"
 PROD_DB_DEST="${PROD_BACKUP_DIR}/gifttracker.db"
 PROD_ENV_DEST="${PROD_BACKUP_DIR}/.env"
@@ -36,7 +53,22 @@ PROD_PULL_MARKER="${PROD_BACKUP_DIR}/PULL_OK_AT"
 DROPLET="root@134.199.211.199"
 PROD_APP_DIR="/opt/giftlist"
 
+# CCC runs preflight as root; outputs would end up root-owned and block the
+# next interactive run by the user. Reassert ownership on every exit path so
+# the backup dir stays writable to gaylonvorwaller regardless of caller.
+OWNER_USER="gaylonvorwaller"
+OWNER_GROUP="staff"
+restore_ownership() {
+  if [[ $EUID -eq 0 ]]; then
+    /usr/sbin/chown -R "${OWNER_USER}:${OWNER_GROUP}" "${BACKUP_DIR}" 2>/dev/null || true
+  fi
+}
+trap restore_ownership EXIT
+
 LOCAL_ONLY=0
+# CCC invokes preflight scripts with positional args ($1 source, $2 dest, $3
+# exit code from prior task). We only care about our own flags; everything
+# else is ignored so CCC's calling convention doesn't trip us up.
 for arg in "$@"; do
   case "$arg" in
     --local-only) LOCAL_ONLY=1 ;;
@@ -44,7 +76,11 @@ for arg in "$@"; do
       echo "Usage: $0 [--local-only]"
       exit 0
       ;;
-    *) echo "Unknown argument: $arg" >&2; exit 2 ;;
+    --*|-?)
+      echo "Unknown flag: $arg" >&2
+      exit 2
+      ;;
+    *) ;; # ignore positional args (CCC passes source/dest paths)
   esac
 done
 
@@ -81,8 +117,14 @@ mkdir -p "${PROD_BACKUP_DIR}"
 # We snapshot prod-side to a tmp file, scp it down, then clean up the tmp.
 # Using BatchMode so SSH fails fast if no agent/key is available (e.g. CCC
 # running with a stripped env) instead of hanging on a password prompt.
+#
+# CCC runs preflight scripts as root, whose HOME is /var/root and has no
+# SSH key authorized on the droplet. Point SSH at gaylonvorwaller's key and
+# known_hosts explicitly so the same SSH_OPTS work whether the script is
+# launched interactively as the user or by CCC as root.
 PROD_TMP="${PROD_APP_DIR}/data/backup/.ccc-pull-tmp.db"
-SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5"
+USER_SSH_DIR="/Users/gaylonvorwaller/.ssh"
+SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o IdentitiesOnly=yes -i ${USER_SSH_DIR}/id_ed25519 -o UserKnownHostsFile=${USER_SSH_DIR}/known_hosts"
 
 # Disable strict error-out for the network section so we can clean up before
 # exiting on partial failure.
