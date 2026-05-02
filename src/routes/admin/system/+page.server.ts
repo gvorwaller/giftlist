@@ -6,6 +6,7 @@ import {
 	JOB_NAME as CHRISTMAS_JOB,
 	runChristmasKickoffJob
 } from '$server/jobs/christmas-kickoff';
+import { JOB_NAME as BACKUP_JOB, runBackupJob } from '$server/jobs/backup';
 import { lastBackupIso } from '$server/admin-home';
 import { configuredChannels } from '$server/notify';
 
@@ -15,6 +16,7 @@ export const load: PageServerLoad = ({ locals }) => {
 	const recentRuns = listJobRuns({ limit: 30 });
 	const reminderLast = getLastRun(REMINDER_JOB);
 	const christmasLast = getLastRun(CHRISTMAS_JOB);
+	const backupLast = getLastRun(BACKUP_JOB);
 
 	return {
 		recentRuns,
@@ -29,7 +31,8 @@ export const load: PageServerLoad = ({ locals }) => {
 		},
 		backup: {
 			path: './data/backup/gifttracker.db',
-			lastAt: lastBackupIso()
+			lastAt: lastBackupIso(),
+			lastRun: backupLast ?? null
 		}
 	};
 };
@@ -57,6 +60,20 @@ export const actions: Actions = {
 				return fail(500, { error: result.error?.message ?? 'Unknown failure' });
 			}
 			return { ok: true, summary: `Ran Christmas kickoff (run ${result.runId})` };
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return fail(409, { error: message });
+		}
+	},
+
+	runBackupNow: async ({ locals }) => {
+		if (!locals.user) throw redirect(303, '/login');
+		try {
+			const result = await runBackupJob();
+			if (result.status === 'error') {
+				return fail(500, { error: result.error?.message ?? 'Unknown failure' });
+			}
+			return { ok: true, summary: `Backup snapshot written (run ${result.runId})` };
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			return fail(409, { error: message });

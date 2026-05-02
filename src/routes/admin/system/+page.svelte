@@ -56,17 +56,27 @@
 
 	<section class="card">
 		<p class="eyebrow">Database backup</p>
-		<p class="body">
-			{#if data.backup.lastAt}
-				Last snapshot at <strong>{formatTimestamp(data.backup.lastAt)}</strong>.
-			{:else}
-				No snapshot found at <code>{data.backup.path}</code> yet.
-			{/if}
-		</p>
-		<p class="muted">
-			CCC pre-flight runs <code>scripts/backup-sqlite.sh</code> which produces a consistent
-			snapshot without pausing writes. CCC then uploads the snapshot directory to the NAS.
-		</p>
+		<div class="row">
+			<div>
+				<p class="body">
+					{#if data.backup.lastAt}
+						Last snapshot at <strong>{formatTimestamp(data.backup.lastAt)}</strong>.
+					{:else}
+						No snapshot at <code>{data.backup.path}</code> yet.
+					{/if}
+				</p>
+				<p class="muted">
+					A nightly cron runs SQLite's online backup API to produce a consistent
+					snapshot without pausing writes.
+				</p>
+				{#if data.backup.lastRun?.error_message}
+					<p class="err-line">{data.backup.lastRun.error_message}</p>
+				{/if}
+			</div>
+			<form method="POST" action="?/runBackupNow">
+				<button type="submit" class="primary">Run backup now</button>
+			</form>
+		</div>
 	</section>
 
 	<section class="card">

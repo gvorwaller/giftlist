@@ -183,7 +183,7 @@ function choosePriority(snapshot: SystemSnapshot, needs: NeedsReview): PriorityA
 	if (snapshot.lastBackupAt == null) {
 		return {
 			title: 'No database backup on file yet',
-			body: 'Run scripts/backup-sqlite.sh or wait for tonight\'s Carbon Copy Cloner pre-flight.',
+			body: 'The nightly backup job has not produced a snapshot at data/backup/gifttracker.db. Check the System page for the next scheduled run.',
 			href: '/admin/system'
 		};
 	}
