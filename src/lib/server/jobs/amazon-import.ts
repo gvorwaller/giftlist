@@ -34,6 +34,7 @@ export interface ScanResult {
 	parsed: number;
 	newRows: number;
 	existingRows: number;
+	autoMoved: number;
 }
 
 function setRunStatus(
@@ -128,6 +129,12 @@ export async function runAmazonScan(
 			const fresh = summaries.filter((s) => !existingIdStmt.get(s.id));
 			existing = summaries.length - fresh.length;
 
+			// Auto-skipped messages (marketing / review_request) and historical
+			// stragglers — rows already staged with non-pending disposition that
+			// somehow remain in INBOX_LABEL — get batch-moved to PROCESSED_LABEL
+			// at the end of the scan so the inbox label doesn't accumulate noise.
+			const idsToMove: string[] = [];
+
 			// Bounded parallelism for getFullMessage. messages.get is 5 quota
 			// units; Gmail allows 250 units/sec/user, so concurrency 10 = 50
 			// units/sec sustained — comfortably below the throttle. Serial
@@ -150,6 +157,7 @@ export async function runAmazonScan(
 
 					const match = matchRecipient(parse.recipientName);
 					const candidatesJson = JSON.stringify(match.candidates);
+					const disposition = defaultDisposition(parse.emailType);
 
 					insertRowStmt.run(
 						run.id,
@@ -170,9 +178,37 @@ export async function runAmazonScan(
 						match.personId,
 						match.confidence,
 						candidatesJson,
-						defaultDisposition(parse.emailType)
+						disposition
 					);
 					newRows += 1;
+
+					if (disposition !== 'pending') idsToMove.push(s.id);
+				}
+			}
+
+			// Stragglers: summaries already in import_rows whose disposition is
+			// no longer pending (auto-skipped before this fix shipped, or skipped
+			// via UI but the prior batch label move failed). Fold them into the
+			// same batch-move so the inbox label self-heals over time.
+			if (existing > 0) {
+				const freshIds = new Set(fresh.map((s) => s.id));
+				const dispoStmt = db.prepare<[string], { disposition: string }>(
+					'SELECT disposition FROM import_rows WHERE source_message_id = ?'
+				);
+				for (const s of summaries) {
+					if (freshIds.has(s.id)) continue;
+					const row = dispoStmt.get(s.id);
+					if (row && row.disposition !== 'pending') idsToMove.push(s.id);
+				}
+			}
+
+			let autoMoved = 0;
+			if (idsToMove.length > 0) {
+				try {
+					await batchMoveToLabel(userId, idsToMove, INBOX_LABEL, PROCESSED_LABEL);
+					autoMoved = idsToMove.length;
+				} catch (err) {
+					console.warn('[amazon-import] auto-skip label move failed:', err);
 				}
 			}
 
@@ -184,14 +220,21 @@ export async function runAmazonScan(
 				entityType: 'import',
 				entityId: run.id,
 				action: 'amazon_scan',
-				summary: `Scanned ${summaries.length} messages; staged ${newRows} new (${existing} already staged)`
+				summary: `Scanned ${summaries.length} messages; staged ${newRows} new (${existing} already staged)${autoMoved > 0 ? `; moved ${autoMoved} auto-skipped to processed` : ''}`
 			});
 
-			return { runId: run.id, fetched: summaries.length, parsed, newRows, existingRows: existing };
+			return {
+				runId: run.id,
+				fetched: summaries.length,
+				parsed,
+				newRows,
+				existingRows: existing,
+				autoMoved
+			};
 		},
 		{
 			summarize: (r) =>
-				`run ${r.runId} — fetched ${r.fetched}, ${r.newRows} new rows, ${r.existingRows} already staged`
+				`run ${r.runId} — fetched ${r.fetched}, ${r.newRows} new rows, ${r.existingRows} already staged${r.autoMoved > 0 ? `, ${r.autoMoved} auto-moved` : ''}`
 		}
 	);
 }
