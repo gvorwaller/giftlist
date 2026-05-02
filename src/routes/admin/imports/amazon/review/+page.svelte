@@ -106,6 +106,8 @@
 			<ul class="rows">
 				{#each pending as r (r.id)}
 					{@const candidates = parseCandidates(r.match_candidates_json)}
+					{@const giftMatch = data.giftMatches[r.id]}
+					{@const giftCandidates = giftMatch?.candidates ?? []}
 					<li class="row-card">
 						<input type="hidden" name="row_id" value={r.id} />
 
@@ -172,8 +174,50 @@
 								<span>Leave pending → stays in Inbox, re-surfaces next scan</span>
 							</label>
 
+							{#if giftCandidates.length > 0}
+								<fieldset class="gift-link">
+									<legend>
+										Looks like an existing
+										{giftCandidates.length === 1 ? 'gift' : 'gift idea'}
+										{#if giftMatch?.confidence === 'strong'}
+											<span class="badge strong">strong match</span>
+										{:else}
+											<span class="badge weak">weak match</span>
+										{/if}
+									</legend>
+									<label class="gift-radio">
+										<input
+											type="radio"
+											name="gift_{r.id}"
+											value=""
+											checked={giftMatch?.confidence !== 'strong'}
+										/>
+										<span>Don't link — create a new gift</span>
+									</label>
+									{#each giftCandidates as g (g.giftId)}
+										<label class="gift-radio">
+											<input
+												type="radio"
+												name="gift_{r.id}"
+												value={String(g.giftId)}
+												checked={giftMatch?.topId === g.giftId}
+											/>
+											<span>
+												<strong>{g.title}</strong>
+												<span class="muted">→ {g.personDisplayName}</span>
+												<span class="score">{Math.round(g.score * 100)}%</span>
+											</span>
+										</label>
+									{/each}
+									<p class="hint">
+										Linking will set the gift's order ID, advance it from idea
+										to ordered/shipped/delivered, and use the gift's recipient.
+									</p>
+								</fieldset>
+							{/if}
+
 							<label class="person-select">
-								<span class="label">Assign to</span>
+								<span class="label">Or assign to person</span>
 								<select name="person_{r.id}">
 									<option value="">— unassigned —</option>
 									{#each data.people as p (p.id)}
@@ -502,6 +546,85 @@
 		font-family: var(--font-sans);
 		font-size: 13px;
 		color: var(--muted);
+	}
+
+	.gift-link {
+		grid-column: 1 / span 2;
+		border: 1px solid var(--green);
+		background: var(--green-soft);
+		border-radius: var(--radius-control);
+		padding: 12px 14px;
+		margin: 4px 0;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.gift-link legend {
+		font-family: var(--font-sans);
+		font-size: 12px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--green);
+		padding: 0 8px;
+	}
+
+	.gift-link .badge {
+		display: inline-block;
+		padding: 1px 8px;
+		border-radius: var(--radius-pill);
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		margin-left: 6px;
+		text-transform: uppercase;
+	}
+	.gift-link .badge.strong {
+		background: var(--green);
+		color: var(--paper);
+	}
+	.gift-link .badge.weak {
+		background: var(--amber-soft);
+		color: var(--amber);
+		border: 1px solid var(--amber);
+	}
+
+	.gift-radio {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		font-family: var(--font-sans);
+		font-size: 14px;
+		color: var(--ink);
+		padding: 4px 0;
+	}
+
+	.gift-radio input[type='radio'] {
+		width: 20px;
+		height: 20px;
+		accent-color: var(--green);
+		flex-shrink: 0;
+	}
+
+	.gift-radio .muted {
+		color: var(--muted);
+		font-size: 13px;
+		margin-left: 6px;
+	}
+
+	.gift-radio .score {
+		margin-left: auto;
+		font-size: 12px;
+		color: var(--muted);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.gift-link .hint {
+		font-family: var(--font-sans);
+		font-size: 12px;
+		color: var(--muted);
+		margin-top: 4px;
 	}
 
 	.choice-grid .alias input[type='checkbox'] {

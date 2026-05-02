@@ -253,6 +253,14 @@ export interface CommitRowInput {
 	rowId: number;
 	action: 'accept' | 'skip';
 	assignedPersonId?: number;
+	/**
+	 * Optional: link this email to an existing gift instead of creating a new
+	 * one. Used when the review UI's title-fuzzy matcher proposes a pre-existing
+	 * "idea"/"planned" gift. The gift's person_id wins over assignedPersonId,
+	 * and its order_id is stamped from the email so subsequent shipped/delivered
+	 * messages auto-bind via the existing order_id grouping.
+	 */
+	assignedGiftId?: number;
 	saveAsAlias?: boolean;
 }
 
@@ -319,9 +327,19 @@ export async function commitReviewedRows(
 			.filter((x) => x.row)
 			.sort((a, b) => lifecycleOrder(a.row.email_type) - lifecycleOrder(b.row.email_type));
 
-		let giftId: number | null = null;
+		// If any decision in this group links to an existing gift, that wins:
+		// load it once, override personId from the gift, skip create.
+		const linkDecision = orderedGroup.find((x) => x.d.assignedGiftId);
+		const linkedGift =
+			linkDecision && linkDecision.d.assignedGiftId
+				? getGiftById(linkDecision.d.assignedGiftId)
+				: null;
+
+		let giftId: number | null = linkedGift?.id ?? null;
 		for (const { d, row } of orderedGroup) {
-			const personId = d.assignedPersonId ?? row.match_person_id ?? null;
+			// Linked gift's person is authoritative; otherwise fall back to the
+			// admin's per-row pick or the auto-matched person.
+			const personId = linkedGift?.person_id ?? d.assignedPersonId ?? row.match_person_id ?? null;
 			if (!personId) {
 				updateRow.run(
 					'failed',
@@ -349,7 +367,9 @@ export async function commitReviewedRows(
 					'accepted',
 					giftId,
 					personId,
-					row.match_confidence ?? 'none',
+					// Manual gift-link is an explicit human confirmation, so we record
+					// it as 'exact' — the schema CHECK only allows the existing enum.
+					linkedGift ? 'exact' : (row.match_confidence ?? 'none'),
 					null,
 					row.id
 				);

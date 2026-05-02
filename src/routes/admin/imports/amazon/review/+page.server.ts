@@ -8,6 +8,7 @@ import {
 	listRowsForRun,
 	type CommitRowInput
 } from '$server/jobs/amazon-import';
+import { matchGiftByTitle, type GiftMatchResult } from '$server/gift-matcher';
 import type { ImportRow } from '$server/types';
 
 export const load: PageServerLoad = ({ locals, url }) => {
@@ -29,7 +30,18 @@ export const load: PageServerLoad = ({ locals, url }) => {
 		return (b.received_at ?? '').localeCompare(a.received_at ?? '');
 	});
 
-	return { run, rows, people };
+	// Compute fuzzy gift-title matches for pending rows so the UI can suggest
+	// linking the email to an existing idea/planned gift instead of creating
+	// a new one. Modern Amazon emails strip recipient + gift designation, so
+	// title-match is often the only reliable signal.
+	const giftMatches: Record<number, GiftMatchResult> = {};
+	for (const r of rows) {
+		if (r.disposition === 'pending' && r.parsed_title) {
+			giftMatches[r.id] = matchGiftByTitle(r.parsed_title);
+		}
+	}
+
+	return { run, rows, people, giftMatches };
 };
 
 function parseDecisions(fd: FormData): CommitRowInput[] {
@@ -44,6 +56,7 @@ function parseDecisions(fd: FormData): CommitRowInput[] {
 		if (dispositionRaw === 'leave') continue;
 
 		const assignedPerson = Number(fd.get(`person_${rowId}`));
+		const assignedGift = Number(fd.get(`gift_${rowId}`));
 		const saveAsAlias = fd.get(`alias_${rowId}`) === 'on';
 		if (dispositionRaw === 'skip') {
 			decisions.push({ rowId, action: 'skip' });
@@ -53,7 +66,10 @@ function parseDecisions(fd: FormData): CommitRowInput[] {
 			decisions.push({
 				rowId,
 				action: 'accept',
-				assignedPersonId: Number.isFinite(assignedPerson) && assignedPerson > 0 ? assignedPerson : undefined,
+				assignedPersonId:
+					Number.isFinite(assignedPerson) && assignedPerson > 0 ? assignedPerson : undefined,
+				assignedGiftId:
+					Number.isFinite(assignedGift) && assignedGift > 0 ? assignedGift : undefined,
 				saveAsAlias
 			});
 		}
