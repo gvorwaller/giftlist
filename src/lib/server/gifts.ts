@@ -41,7 +41,7 @@ export interface GiftUpdateInput {
 	tracking_status?: string | null;
 	tracking_status_at?: string | null;
 	tracking_estimated_delivery?: string | null;
-	aftership_tracking_id?: string | null;
+	tracking_provider_id?: string | null;
 }
 
 export interface GiftWithContext extends Gift {
@@ -183,7 +183,7 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 		'tracking_status',
 		'tracking_status_at',
 		'tracking_estimated_delivery',
-		'aftership_tracking_id'
+		'tracking_provider_id'
 	];
 	const changed: string[] = [];
 	for (const col of columns) {
@@ -237,7 +237,7 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 		    person_id = ?, title = ?, source = ?, source_url = ?, occasion_id = ?, occasion_year = ?,
 		    order_id = ?, tracking_number = ?, carrier = ?, price_cents = ?, notes = ?, vendor_id = ?,
 		    shipper_id = ?, tracking_status = ?, tracking_status_at = ?,
-		    tracking_estimated_delivery = ?, aftership_tracking_id = ?,
+		    tracking_estimated_delivery = ?, tracking_provider_id = ?,
 		    updated_at = CURRENT_TIMESTAMP
 		  WHERE id = ?`
 	).run(
@@ -257,7 +257,7 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 		merged.tracking_status,
 		merged.tracking_status_at,
 		merged.tracking_estimated_delivery,
-		merged.aftership_tracking_id,
+		merged.tracking_provider_id,
 		id
 	);
 	const after = getGiftById(id)!;

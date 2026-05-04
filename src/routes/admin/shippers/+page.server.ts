@@ -31,10 +31,10 @@ export const actions: Actions = {
 		if (!locals.user) throw redirect(303, '/login');
 		const fd = await request.formData();
 		const name = str(fd, 'name');
-		const slug = strOrNull(fd, 'aftership_slug');
+		const slug = strOrNull(fd, 'tracking_provider_slug');
 		if (!name) return fail(400, { scope: 'create', error: 'Shipper name is required.' });
 		try {
-			createShipper({ name, aftership_slug: slug }, locals.user.id);
+			createShipper({ name, tracking_provider_slug: slug }, locals.user.id);
 		} catch (err) {
 			return fail(400, {
 				scope: 'create',
@@ -49,13 +49,13 @@ export const actions: Actions = {
 		const fd = await request.formData();
 		const id = Number(fd.get('id'));
 		const name = str(fd, 'name');
-		const slug = strOrNull(fd, 'aftership_slug');
+		const slug = strOrNull(fd, 'tracking_provider_slug');
 		if (!Number.isInteger(id)) return fail(400, { scope: 'update', error: 'Invalid shipper id.' });
 		if (!name) return fail(400, { scope: 'update', id, error: 'Shipper name is required.' });
 		if (!getShipperById(id))
 			return fail(404, { scope: 'update', id, error: 'Shipper not found.' });
 		try {
-			updateShipper(id, { name, aftership_slug: slug }, locals.user.id);
+			updateShipper(id, { name, tracking_provider_slug: slug }, locals.user.id);
 		} catch (err) {
 			return fail(400, {
 				scope: 'update',

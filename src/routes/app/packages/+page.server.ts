@@ -2,7 +2,7 @@ import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { listGifts } from '$server/gifts';
 import { personForGift } from '$server/today';
-import { isAftershipConfigured, pullAllInFlight } from '$server/tracking';
+import { isTrackingProviderConfigured, pullAllInFlight } from '$server/tracking';
 
 export const load: PageServerLoad = ({ locals }) => {
 	if (!locals.user) throw redirect(303, '/login');
@@ -18,17 +18,17 @@ export const load: PageServerLoad = ({ locals }) => {
 		person_display_name: personForGift(g.person_id)?.display_name ?? '(archived)'
 	}));
 
-	return { inFlight, aftershipConfigured: isAftershipConfigured() };
+	return { inFlight, trackingProviderConfigured: isTrackingProviderConfigured() };
 };
 
 export const actions: Actions = {
 	// Page-level "Refresh all" — runs the same routine as the daily scheduled
-	// job but at the user's request. Bounded by AfterShip's per-endpoint rate
-	// limit; safe to spam since terminal-state shipments are skipped.
+	// job but at the user's request. Safe to invoke repeatedly since
+	// terminal-state shipments are skipped server-side.
 	refreshAll: async ({ locals }) => {
 		if (!locals.user) throw redirect(303, '/login');
-		if (!isAftershipConfigured()) {
-			return fail(503, { trackingError: 'AfterShip not configured.' });
+		if (!isTrackingProviderConfigured()) {
+			return fail(503, { trackingError: 'Shippo not configured.' });
 		}
 		try {
 			const result = await pullAllInFlight(locals.user.id);

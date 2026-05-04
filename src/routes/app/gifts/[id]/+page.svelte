@@ -196,7 +196,7 @@
 								· {formatDateTime(data.gift.tracking_status_at)}
 							{/if}
 						</p>
-					{:else if data.aftershipConfigured && data.gift.aftership_tracking_id}
+					{:else if data.trackingProviderConfigured && data.gift.tracking_provider_id}
 						<p class="tracking-status muted">Awaiting first checkpoint…</p>
 					{/if}
 					{#if data.gift.tracking_estimated_delivery}
@@ -205,7 +205,7 @@
 						</p>
 					{/if}
 				</div>
-				{#if data.aftershipConfigured}
+				{#if data.trackingProviderConfigured}
 					<form method="POST" action="?/refreshTracking" class="refresh-form">
 						<button type="submit" class="ghost small">Refresh</button>
 					</form>

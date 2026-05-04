@@ -8,7 +8,7 @@ import {
 } from '$server/jobs/christmas-kickoff';
 import { JOB_NAME as BACKUP_JOB, runBackupJob } from '$server/jobs/backup';
 import { TRACKING_REFRESH_JOB, runTrackingRefresh } from '$server/jobs/tracking-refresh';
-import { isAftershipConfigured } from '$server/tracking';
+import { isTrackingProviderConfigured } from '$server/tracking';
 import { lastBackupIso } from '$server/admin-home';
 import { configuredChannels } from '$server/notify';
 
@@ -40,7 +40,7 @@ export const load: PageServerLoad = ({ locals }) => {
 		tracking: {
 			name: TRACKING_REFRESH_JOB,
 			lastRun: trackingLast ?? null,
-			configured: isAftershipConfigured()
+			configured: isTrackingProviderConfigured()
 		}
 	};
 };
@@ -97,7 +97,7 @@ export const actions: Actions = {
 			}
 			const r = result.result!;
 			const summary = r.skipped
-				? 'Skipped — AfterShip not configured'
+				? 'Skipped — Shippo not configured'
 				: `Checked ${r.checked} in-flight, ${r.updated} updated, ${r.failed} failed`;
 			return { ok: true, summary };
 		} catch (err) {

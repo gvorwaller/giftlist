@@ -5,7 +5,7 @@ import { listPersonOccasions } from '$server/occasions';
 import { getPersonById, listPeople } from '$server/people';
 import { listVendors, getVendorById } from '$server/vendors';
 import { listShippers, getShipperById } from '$server/shippers';
-import { registerWithAftership } from '$server/tracking';
+import { registerWithProvider } from '$server/tracking';
 
 function trim(v: FormDataEntryValue | null): string {
 	return typeof v === 'string' ? v.trim() : '';
@@ -113,11 +113,12 @@ export const actions: Actions = {
 				tracking_number: newTracking,
 				price_cents,
 				notes: nullable(trim(fd.get('notes'))),
-				// If the tracking number changed, clear the AfterShip linkage so
-				// the next save attempt re-registers under the new number.
+				// If the tracking number changed, clear the tracking-provider
+				// linkage so the next save attempt re-registers under the new
+				// number.
 				...(trackingChanged
 					? {
-							aftership_tracking_id: null,
+							tracking_provider_id: null,
 							tracking_status: null,
 							tracking_status_at: null,
 							tracking_estimated_delivery: null
@@ -127,12 +128,12 @@ export const actions: Actions = {
 			locals.user.id
 		);
 
-		// Register (or re-register) with AfterShip if there's now a tracking
+		// Register (or re-register) with Shippo if there's now a tracking
 		// number and one wasn't previously registered. Fire-and-forget — don't
 		// block the redirect; failures bubble to logs and the next refresh.
-		if (newTracking && process.env.AFTERSHIP_API_KEY) {
-			registerWithAftership(gift.id, locals.user.id).catch((err) => {
-				console.warn('[gifts/edit] AfterShip register failed:', err);
+		if (newTracking && process.env.SHIPPO_API_KEY) {
+			registerWithProvider(gift.id, locals.user.id).catch((err) => {
+				console.warn('[gifts/edit] Shippo register failed:', err);
 			});
 		}
 

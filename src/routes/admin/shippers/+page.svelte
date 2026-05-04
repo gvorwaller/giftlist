@@ -33,10 +33,10 @@
 		<p class="crumbs"><a href="/admin">Admin</a> / Shippers</p>
 		<h1>Shippers</h1>
 		<p class="subtitle">
-			The carriers your packages travel on. The "AfterShip slug" tells the tracking
-			service which carrier to query — leave blank to let AfterShip auto-detect from
-			the tracking-number format. Common slugs:
-			<code>usps</code>, <code>ups</code>, <code>fedex</code>, <code>dhl</code>,
+			The carriers your packages travel on. The "Shippo slug" tells the tracking
+			service which carrier to query. Leave blank for the catch-all "Other" entry
+			or for vendors you'll only enter manually. Common slugs:
+			<code>usps</code>, <code>ups</code>, <code>fedex</code>, <code>dhl_express</code>,
 			<code>ontrac</code>, <code>lasership</code>.
 		</p>
 	</header>
@@ -55,10 +55,10 @@
 				/>
 			</label>
 			<label class="add-label slug-label">
-				<span class="lbl">AfterShip slug</span>
+				<span class="lbl">Shippo slug</span>
 				<input
 					type="text"
-					name="aftership_slug"
+					name="tracking_provider_slug"
 					autocomplete="off"
 					placeholder="dhl"
 					pattern="[a-z0-9-]*"
@@ -98,11 +98,11 @@
 									/>
 								</label>
 								<label class="edit-field">
-									<span class="lbl">AfterShip slug</span>
+									<span class="lbl">Shippo slug</span>
 									<input
 										type="text"
-										name="aftership_slug"
-										value={s.aftership_slug ?? ''}
+										name="tracking_provider_slug"
+										value={s.tracking_provider_slug ?? ''}
 										autocomplete="off"
 										pattern="[a-z0-9-]*"
 									/>
@@ -122,7 +122,7 @@
 								<div>
 									<p class="name">{s.name}</p>
 									<p class="meta">
-										{s.aftership_slug ? `slug: ${s.aftership_slug}` : 'auto-detect'}
+										{s.tracking_provider_slug ? `slug: ${s.tracking_provider_slug}` : 'auto-detect'}
 										· {used} {used === 1 ? 'gift' : 'gifts'}
 									</p>
 								</div>
@@ -157,7 +157,7 @@
 							<div>
 								<p class="name dim">{s.name}</p>
 								<p class="meta">
-									{s.aftership_slug ? `slug: ${s.aftership_slug}` : 'auto-detect'}
+									{s.tracking_provider_slug ? `slug: ${s.tracking_provider_slug}` : 'auto-detect'}
 									· {used} {used === 1 ? 'gift' : 'gifts'}
 								</p>
 							</div>

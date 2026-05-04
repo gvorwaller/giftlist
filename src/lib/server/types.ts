@@ -87,7 +87,7 @@ export interface Gift {
 	tracking_status: string | null;
 	tracking_status_at: string | null;
 	tracking_estimated_delivery: string | null;
-	aftership_tracking_id: string | null;
+	tracking_provider_id: string | null;
 	created_at: string;
 	updated_at: string;
 }

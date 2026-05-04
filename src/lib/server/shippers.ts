@@ -4,7 +4,13 @@ import { logAudit } from './audit';
 export interface Shipper {
 	id: number;
 	name: string;
-	aftership_slug: string | null;
+	/**
+	 * Carrier slug used by the configured tracking provider (currently Shippo;
+	 * was AfterShip prior to 2026-05). The major US carriers (usps, ups, fedex)
+	 * use identical slugs across providers, so existing rows survive a swap.
+	 * NULL means "let the provider auto-detect from tracking-number format."
+	 */
+	tracking_provider_slug: string | null;
 	is_archived: 0 | 1;
 	created_at: string;
 	updated_at: string;
@@ -36,8 +42,10 @@ export function getShipperByName(name: string): Shipper | undefined {
 
 export interface ShipperUpsertInput {
 	name: string;
-	aftership_slug: string | null;
+	tracking_provider_slug: string | null;
 }
+
+
 
 export function createShipper(input: ShipperUpsertInput, actorUserId: number): Shipper {
 	const trimmed = input.name.trim();
@@ -45,10 +53,10 @@ export function createShipper(input: ShipperUpsertInput, actorUserId: number): S
 	const existing = getShipperByName(trimmed);
 	if (existing) throw new Error(`Shipper "${existing.name}" already exists`);
 
-	const slug = normalizeSlug(input.aftership_slug);
+	const slug = normalizeSlug(input.tracking_provider_slug);
 	const db = getDb();
 	const info = db
-		.prepare('INSERT INTO shippers (name, aftership_slug) VALUES (?, ?)')
+		.prepare('INSERT INTO shippers (name, tracking_provider_slug) VALUES (?, ?)')
 		.run(trimmed, slug);
 	const id = Number(info.lastInsertRowid);
 	const shipper = getShipperById(id)!;
@@ -61,6 +69,8 @@ export function createShipper(input: ShipperUpsertInput, actorUserId: number): S
 	});
 	return shipper;
 }
+
+
 
 export function updateShipper(
 	id: number,
@@ -77,17 +87,17 @@ export function updateShipper(
 		throw new Error(`Another shipper named "${collision.name}" already exists`);
 	}
 
-	const slug = normalizeSlug(input.aftership_slug);
+	const slug = normalizeSlug(input.tracking_provider_slug);
 	const db = getDb();
 	db.prepare(
-		'UPDATE shippers SET name = ?, aftership_slug = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+		'UPDATE shippers SET name = ?, tracking_provider_slug = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
 	).run(trimmed, slug, id);
 	const after = getShipperById(id)!;
 
 	const changes: string[] = [];
 	if (before.name !== after.name) changes.push(`name "${before.name}" → "${after.name}"`);
-	if (before.aftership_slug !== after.aftership_slug) {
-		changes.push(`slug "${before.aftership_slug ?? '∅'}" → "${after.aftership_slug ?? '∅'}"`);
+	if (before.tracking_provider_slug !== after.tracking_provider_slug) {
+		changes.push(`slug "${before.tracking_provider_slug ?? '∅'}" → "${after.tracking_provider_slug ?? '∅'}"`);
 	}
 	if (changes.length > 0) {
 		logAudit({
@@ -136,15 +146,16 @@ export function shipperUsageCount(id: number): number {
 }
 
 /**
- * Normalize the AfterShip carrier slug. Slugs are lowercase ASCII identifiers.
- * Empty / whitespace becomes NULL ("auto-detect from tracking number").
+ * Normalize the carrier slug used by the tracking provider. Slugs are
+ * lowercase ASCII identifiers (Shippo and AfterShip both follow this
+ * convention). Empty / whitespace becomes NULL.
  */
 function normalizeSlug(raw: string | null | undefined): string | null {
 	if (raw == null) return null;
 	const s = raw.trim().toLowerCase();
 	if (s === '') return null;
-	if (!/^[a-z0-9-]+$/.test(s)) {
-		throw new Error(`Invalid AfterShip slug "${raw}" — only a-z, 0-9, hyphens`);
+	if (!/^[a-z0-9_-]+$/.test(s)) {
+		throw new Error(`Invalid carrier slug "${raw}" — only a-z, 0-9, hyphens, underscores`);
 	}
 	return s;
 }

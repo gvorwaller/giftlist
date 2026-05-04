@@ -6,7 +6,7 @@ import { createGift, parseDollarsToCents } from '$server/gifts';
 import { deleteDraft, getFreshDraft, parseDraftPayload } from '$server/drafts';
 import { listVendors, getVendorById } from '$server/vendors';
 import { listShippers, getShipperById } from '$server/shippers';
-import { registerWithAftership } from '$server/tracking';
+import { registerWithProvider } from '$server/tracking';
 import type { OccasionWithLink } from '$server/occasions';
 
 export interface GiftDraftPayload {
@@ -154,12 +154,12 @@ export const actions: Actions = {
 		);
 		deleteDraft(locals.user.id, 'gift');
 
-		// Fire-and-forget AfterShip registration. We don't block the redirect
-		// on the network call — failures are logged and the next manual or
+		// Fire-and-forget Shippo registration. We don't block the redirect on
+		// the network call — failures are logged and the next manual or
 		// scheduled refresh will pick up the slack.
-		if (gift.tracking_number && process.env.AFTERSHIP_API_KEY) {
-			registerWithAftership(gift.id, locals.user.id).catch((err) => {
-				console.warn('[gifts/new] AfterShip register failed:', err);
+		if (gift.tracking_number && process.env.SHIPPO_API_KEY) {
+			registerWithProvider(gift.id, locals.user.id).catch((err) => {
+				console.warn('[gifts/new] Shippo register failed:', err);
 			});
 		}
 

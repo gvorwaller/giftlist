@@ -34,7 +34,7 @@
 		<p class="subtitle">
 			Bought, not yet delivered. Tap a row for status, or the pencil to edit.
 		</p>
-		{#if data.aftershipConfigured && data.inFlight.length > 0}
+		{#if data.trackingProviderConfigured && data.inFlight.length > 0}
 			<form method="POST" action="?/refreshAll" class="refresh-row">
 				<button type="submit" class="ghost small">Refresh all tracking</button>
 				{#if form?.ok}

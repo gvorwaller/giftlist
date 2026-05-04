@@ -121,7 +121,7 @@
 	</section>
 
 	<section class="card">
-		<p class="eyebrow">AfterShip tracking refresh</p>
+		<p class="eyebrow">Shippo tracking refresh</p>
 		<div class="row">
 			<div>
 				<p class="body">
@@ -135,13 +135,13 @@
 							Never run yet.
 						{/if}
 					{:else}
-						<strong>AfterShip not configured.</strong> Set
-						<code>AFTERSHIP_API_KEY</code> (and optionally
-						<code>AFTERSHIP_WEBHOOK_SECRET</code>) to enable.
+						<strong>Shippo not configured.</strong> Set
+						<code>SHIPPO_API_KEY</code> (and optionally
+						<code>SHIPPO_WEBHOOK_SECRET</code>) to enable.
 					{/if}
 				</p>
 				<p class="muted">
-					Polls AfterShip for fresh status on every gift with a registered tracking id
+					Polls Shippo for fresh status on every gift with a registered tracking id
 					that hasn't reached a terminal state. Webhooks (if configured) push updates
 					in real time; this job is the catch-up sweep.
 				</p>

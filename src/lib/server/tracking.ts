@@ -5,99 +5,93 @@ import { getShipperById } from './shippers';
 import { logAudit } from './audit';
 import type { Gift, ShipmentEvent } from './types';
 
-const AFTERSHIP_BASE = 'https://api.aftership.com/tracking/2024-07';
+const SHIPPO_BASE = 'https://api.goshippo.com';
 
 /**
- * AfterShip tracking-state vocabulary. We don't enumerate every sub-tag; we
- * only care about distinguishing in-flight from terminal so the scheduled
- * poller can stop checking delivered/returned packages. Anything else is
- * passed through as-is for display.
+ * Shippo's tracking_status enum. Terminal states stop the scheduled poller
+ * from re-querying the same shipment forever. Anything else (including
+ * UNKNOWN, which Shippo uses while the carrier hasn't yet acknowledged the
+ * tracking number) keeps polling.
  */
-const TERMINAL_STATUSES = new Set(['Delivered', 'Returned', 'Expired']);
+const TERMINAL_STATUSES = new Set(['DELIVERED', 'RETURNED', 'FAILURE']);
 
-export interface AftershipConfig {
+export interface TrackingConfig {
 	apiKey: string;
 	webhookSecret: string | null;
 }
 
-function readConfig(): AftershipConfig | null {
-	const apiKey = process.env.AFTERSHIP_API_KEY?.trim();
+function readConfig(): TrackingConfig | null {
+	const apiKey = process.env.SHIPPO_API_KEY?.trim();
 	if (!apiKey) return null;
-	const webhookSecret = process.env.AFTERSHIP_WEBHOOK_SECRET?.trim() || null;
+	const webhookSecret = process.env.SHIPPO_WEBHOOK_SECRET?.trim() || null;
 	return { apiKey, webhookSecret };
 }
 
-export function isAftershipConfigured(): boolean {
+export function isTrackingProviderConfigured(): boolean {
 	return readConfig() !== null;
 }
 
-interface AftershipApiTracking {
-	id: string;
-	tracking_number: string;
-	slug: string | null;
-	tag: string | null;
-	subtag: string | null;
-	subtag_message: string | null;
-	expected_delivery: string | null;
-	checkpoints?: AftershipCheckpoint[];
+interface ShippoTrackingStatus {
+	object_id?: string;
+	status?: string;
+	status_details?: string | null;
+	status_date?: string | null;
+	location?: ShippoLocation | null;
 }
 
-interface AftershipCheckpoint {
-	checkpoint_time?: string;
-	created_at?: string;
-	tag?: string;
-	subtag?: string;
-	subtag_message?: string;
-	message?: string;
-	location?: string;
-	city?: string;
-	state?: string;
-	country_name?: string;
-	raw_status?: string;
+interface ShippoLocation {
+	city?: string | null;
+	state?: string | null;
+	zip?: string | null;
+	country?: string | null;
 }
 
-interface AftershipResponse<T> {
-	meta: { code: number; message?: string; type?: string };
-	data?: T;
+export interface ShippoTrack {
+	carrier?: string;
+	tracking_number?: string;
+	tracking_status?: ShippoTrackingStatus | null;
+	tracking_history?: ShippoTrackingStatus[];
+	eta?: string | null;
+	original_eta?: string | null;
+	servicelevel?: { token?: string; name?: string } | null;
+	address_from?: ShippoLocation | null;
+	address_to?: ShippoLocation | null;
+	metadata?: string | null;
 }
 
-async function aftershipFetch<T>(
-	cfg: AftershipConfig,
-	method: 'GET' | 'POST' | 'DELETE',
+async function shippoFetch<T>(
+	cfg: TrackingConfig,
+	method: 'GET' | 'POST',
 	path: string,
 	body?: unknown
 ): Promise<T> {
-	const res = await fetch(`${AFTERSHIP_BASE}${path}`, {
+	const res = await fetch(`${SHIPPO_BASE}${path}`, {
 		method,
 		headers: {
-			'as-api-key': cfg.apiKey,
+			Authorization: `ShippoToken ${cfg.apiKey}`,
 			'Content-Type': 'application/json'
 		},
 		body: body ? JSON.stringify(body) : undefined
 	});
-	const json = (await res.json()) as AftershipResponse<T>;
-	if (!res.ok || (json.meta && json.meta.code >= 400)) {
-		const msg = json.meta?.message ?? `HTTP ${res.status}`;
-		throw new Error(`AfterShip ${method} ${path} failed: ${msg}`);
+	const text = await res.text();
+	if (!res.ok) {
+		throw new Error(`Shippo ${method} ${path} failed: HTTP ${res.status} ${text.slice(0, 300)}`);
 	}
-	if (!json.data) {
-		throw new Error(`AfterShip ${method} ${path}: empty response data`);
-	}
-	return json.data;
+	return JSON.parse(text) as T;
 }
 
 /**
- * Register a gift's tracking number with AfterShip. Idempotent at AfterShip's
- * end — they de-dup on (slug, tracking_number). Stores the resulting AfterShip
- * tracking id on the gift so subsequent status pulls and webhook callbacks
- * can route back to this row.
+ * Register a gift's tracking number with Shippo so we'll receive webhook
+ * updates when the carrier reports new checkpoints. Idempotent at Shippo's
+ * end — POST /tracks/ with the same (carrier, tracking_number) returns the
+ * same object_id.
  *
  * No-ops (returns null) when:
- *   - AFTERSHIP_API_KEY isn't configured
+ *   - SHIPPO_API_KEY isn't configured
  *   - the gift has no tracking_number
- *   - the gift already has an aftership_tracking_id (already registered)
+ *   - the gift is already registered (tracking_provider_id set)
  */
-export async function registerWithAftership(
+export async function registerWithProvider(
 	giftId: number,
 	actorUserId: number
 ): Promise<string | null> {
@@ -105,43 +99,45 @@ export async function registerWithAftership(
 	if (!cfg) return null;
 	const gift = getGiftById(giftId);
 	if (!gift || !gift.tracking_number || !gift.tracking_number.trim()) return null;
-	if (gift.aftership_tracking_id) return gift.aftership_tracking_id;
+	if (gift.tracking_provider_id) return gift.tracking_provider_id;
 
-	const slug = gift.shipper_id ? (getShipperById(gift.shipper_id)?.aftership_slug ?? null) : null;
+	// Shippo requires a carrier slug — there's no auto-detect. We use the
+	// linked shipper's slug; if absent, default to USPS as the most likely
+	// US carrier, which is also the safest fallback (USPS slugs are validated
+	// loosely so no-ops on a wrong guess).
+	const shipper = gift.shipper_id ? getShipperById(gift.shipper_id) : null;
+	const carrier = shipper?.tracking_provider_slug ?? 'usps';
 
-	const data = await aftershipFetch<{ tracking: AftershipApiTracking }>(
-		cfg,
-		'POST',
-		'/trackings',
-		{
-			tracking: {
-				tracking_number: gift.tracking_number.trim(),
-				// Omit slug entirely if NULL — AfterShip auto-detects from format.
-				...(slug ? { slug } : {})
-			}
-		}
-	);
+	const data = await shippoFetch<ShippoTrack>(cfg, 'POST', '/tracks/', {
+		carrier,
+		tracking_number: gift.tracking_number.trim(),
+		metadata: `gift:${gift.id}`
+	});
 
-	updateGift(giftId, { aftership_tracking_id: data.tracking.id }, actorUserId);
+	const providerId = data.tracking_status?.object_id ?? null;
+	if (!providerId) {
+		// Defensive — Shippo always returns object_id on success but we don't
+		// want to silently lose the registration if the schema ever shifts.
+		console.warn(`[tracking] Shippo /tracks/ returned no object_id for gift ${giftId}`);
+	}
+
+	updateGift(giftId, { tracking_provider_id: providerId }, actorUserId);
 	logAudit({
 		actorUserId,
 		entityType: 'tracking',
 		entityId: giftId,
 		action: 'register',
-		summary: `Registered tracking with AfterShip: ${gift.tracking_number}${slug ? ` (${slug})` : ' (auto-detect)'}`
+		summary: `Registered tracking with Shippo: ${gift.tracking_number} (${carrier})`
 	});
 
-	// Pull current status immediately so the UI doesn't show "—" while
-	// waiting for the first webhook.
-	await pullStatus(giftId, actorUserId).catch((err) => {
-		console.warn(`[tracking] initial pull for gift ${giftId} failed:`, err);
-	});
-
-	return data.tracking.id;
+	// Persist whatever status we already have from the registration response
+	// so the UI doesn't show "—" while waiting for the first webhook callback.
+	applyStatusUpdate(giftId, data, actorUserId);
+	return providerId;
 }
 
 /**
- * Fetch the current status from AfterShip for a single gift and persist it
+ * Fetch the current status from Shippo for a single gift and persist it
  * onto the gift row + the shipment_events history table. Used by both the
  * scheduled poller and the ad-hoc admin "Refresh" buttons.
  */
@@ -152,14 +148,17 @@ export async function pullStatus(
 	const cfg = readConfig();
 	if (!cfg) return null;
 	const gift = getGiftById(giftId);
-	if (!gift || !gift.aftership_tracking_id) return null;
+	if (!gift || !gift.tracking_number) return null;
 
-	const data = await aftershipFetch<{ tracking: AftershipApiTracking }>(
+	const shipper = gift.shipper_id ? getShipperById(gift.shipper_id) : null;
+	const carrier = shipper?.tracking_provider_slug ?? 'usps';
+
+	const data = await shippoFetch<ShippoTrack>(
 		cfg,
 		'GET',
-		`/trackings/${gift.aftership_tracking_id}`
+		`/tracks/${encodeURIComponent(carrier)}/${encodeURIComponent(gift.tracking_number)}`
 	);
-	return applyStatusUpdate(giftId, data.tracking, actorUserId);
+	return applyStatusUpdate(giftId, data, actorUserId);
 }
 
 /**
@@ -169,12 +168,15 @@ export async function pullStatus(
  */
 export function applyStatusUpdate(
 	giftId: number,
-	tracking: AftershipApiTracking,
+	track: ShippoTrack,
 	actorUserId: number
 ): { status: string | null; eventsAppended: number } {
-	const status = tracking.tag ?? null;
-	const statusAt = pickLatestCheckpointTime(tracking) ?? new Date().toISOString();
-	const eta = tracking.expected_delivery ?? null;
+	const status = track.tracking_status?.status ?? null;
+	const statusAt =
+		track.tracking_status?.status_date ??
+		pickLatestHistoryDate(track) ??
+		new Date().toISOString();
+	const eta = track.eta ?? track.original_eta ?? null;
 
 	updateGift(
 		giftId,
@@ -186,23 +188,23 @@ export function applyStatusUpdate(
 		actorUserId
 	);
 
-	const eventsAppended = appendCheckpoints(giftId, tracking.checkpoints ?? []);
+	const eventsAppended = appendCheckpoints(giftId, track.tracking_history ?? []);
 	return { status, eventsAppended };
 }
 
-function pickLatestCheckpointTime(t: AftershipApiTracking): string | null {
-	const cps = t.checkpoints ?? [];
+function pickLatestHistoryDate(t: ShippoTrack): string | null {
+	const hist = t.tracking_history ?? [];
 	let latest: string | null = null;
-	for (const c of cps) {
-		const at = c.checkpoint_time ?? c.created_at;
+	for (const h of hist) {
+		const at = h.status_date;
 		if (!at) continue;
 		if (!latest || at > latest) latest = at;
 	}
 	return latest;
 }
 
-function appendCheckpoints(giftId: number, checkpoints: AftershipCheckpoint[]): number {
-	if (checkpoints.length === 0) return 0;
+function appendCheckpoints(giftId: number, history: ShippoTrackingStatus[]): number {
+	if (history.length === 0) return 0;
 	const db = getDb();
 	const stmt = db.prepare(
 		`INSERT OR IGNORE INTO shipment_events
@@ -210,29 +212,29 @@ function appendCheckpoints(giftId: number, checkpoints: AftershipCheckpoint[]): 
 		 VALUES (?, ?, ?, ?, ?, ?)`
 	);
 	let appended = 0;
-	for (const c of checkpoints) {
-		const at = c.checkpoint_time ?? c.created_at;
+	for (const h of history) {
+		const at = h.status_date;
 		if (!at) continue;
-		const status = c.tag ?? c.subtag ?? c.raw_status ?? null;
-		const message = c.subtag_message ?? c.message ?? null;
-		const location = formatLocation(c);
-		const info = stmt.run(giftId, at, status, message, location, JSON.stringify(c));
+		const status = h.status ?? null;
+		const message = h.status_details ?? null;
+		const location = formatLocation(h.location);
+		const info = stmt.run(giftId, at, status, message, location, JSON.stringify(h));
 		if (info.changes > 0) appended += 1;
 	}
 	return appended;
 }
 
-function formatLocation(c: AftershipCheckpoint): string | null {
-	if (c.location) return c.location;
-	const bits = [c.city, c.state, c.country_name].filter(Boolean);
+function formatLocation(loc: ShippoLocation | null | undefined): string | null {
+	if (!loc) return null;
+	const bits = [loc.city, loc.state, loc.zip, loc.country].filter(Boolean);
 	return bits.length > 0 ? bits.join(', ') : null;
 }
 
 /**
- * Pull AfterShip status for every gift that has a registered tracking id and
+ * Pull tracking status for every gift that has a registered tracking id and
  * isn't already in a terminal state. Used by the scheduled `tracking.refresh`
- * job; bounded concurrency to stay well under AfterShip rate limits at our
- * scale (a couple dozen rows max).
+ * job; bounded concurrency to stay polite against Shippo's API at our scale
+ * (a couple dozen rows max).
  */
 export async function pullAllInFlight(actorUserId: number): Promise<{
 	checked: number;
@@ -248,7 +250,7 @@ export async function pullAllInFlight(actorUserId: number): Promise<{
 			`SELECT id, tracking_status
 			   FROM gifts
 			  WHERE is_archived = 0
-			    AND aftership_tracking_id IS NOT NULL`
+			    AND tracking_provider_id IS NOT NULL`
 		)
 		.all();
 
@@ -277,31 +279,69 @@ export async function pullAllInFlight(actorUserId: number): Promise<{
 }
 
 /**
- * Verify an AfterShip webhook signature. Header format:
- *   aftership-hmac-sha256: <base64 HMAC-SHA256 of raw body using secret>
- * Returns true on match. Constant-time comparison to avoid timing attacks.
+ * Verify a Shippo webhook signature. Header format:
+ *   shippo-auth-signature: t=<timestamp>,v1=<sha256_hex>
+ * Signed payload: `${timestamp}.${rawBody}`. Constant-time comparison.
+ *
+ * Rejects if SHIPPO_WEBHOOK_SECRET is not configured — better to fail closed
+ * than silently accept unsigned input on a public endpoint.
  */
-export function verifyWebhookSignature(rawBody: string, signatureHeader: string | null): boolean {
+export function verifyWebhookSignature(
+	rawBody: string,
+	signatureHeader: string | null
+): boolean {
 	const cfg = readConfig();
 	if (!cfg || !cfg.webhookSecret) return false;
 	if (!signatureHeader) return false;
-	const expected = createHmac('sha256', cfg.webhookSecret).update(rawBody).digest();
-	let received: Buffer;
-	try {
-		received = Buffer.from(signatureHeader, 'base64');
-	} catch {
-		return false;
+
+	const parts = signatureHeader.split(',').map((p) => p.trim());
+	let timestamp: string | null = null;
+	let signature: string | null = null;
+	for (const p of parts) {
+		const [k, v] = p.split('=', 2);
+		if (k === 't') timestamp = v;
+		if (k === 'v1') signature = v;
 	}
-	if (received.length !== expected.length) return false;
-	return timingSafeEqual(received, expected);
+	if (!timestamp || !signature) return false;
+
+	const signed = `${timestamp}.${rawBody}`;
+	const expected = createHmac('sha256', cfg.webhookSecret).update(signed).digest('hex');
+	if (expected.length !== signature.length) return false;
+	const expectedBuf = Buffer.from(expected, 'utf8');
+	const receivedBuf = Buffer.from(signature, 'utf8');
+	if (expectedBuf.length !== receivedBuf.length) return false;
+	return timingSafeEqual(expectedBuf, receivedBuf);
 }
 
-/** Look up a gift by its AfterShip tracking id (set during registration). */
-export function findGiftByAftershipId(aftershipId: string): Gift | undefined {
+/** Look up a gift by its tracking-provider object id (set during registration). */
+export function findGiftByProviderId(providerId: string): Gift | undefined {
 	const db = getDb();
 	return db
-		.prepare<[string], Gift>('SELECT * FROM gifts WHERE aftership_tracking_id = ?')
-		.get(aftershipId);
+		.prepare<[string], Gift>('SELECT * FROM gifts WHERE tracking_provider_id = ?')
+		.get(providerId);
+}
+
+/**
+ * Fallback lookup by carrier+tracking_number — used when the webhook payload's
+ * object_id doesn't match anything we know (e.g. older registrations from a
+ * provider swap). Returns the most-recently-created match.
+ */
+export function findGiftByCarrierAndNumber(
+	carrier: string,
+	trackingNumber: string
+): Gift | undefined {
+	const db = getDb();
+	return db
+		.prepare<[string, string], Gift>(
+			`SELECT g.*
+			   FROM gifts g
+			   LEFT JOIN shippers s ON s.id = g.shipper_id
+			  WHERE g.tracking_number = ?
+			    AND (LOWER(s.tracking_provider_slug) = LOWER(?) OR s.tracking_provider_slug IS NULL)
+			  ORDER BY g.created_at DESC
+			  LIMIT 1`
+		)
+		.get(trackingNumber, carrier);
 }
 
 export function listShipmentEvents(giftId: number): ShipmentEvent[] {
@@ -312,6 +352,3 @@ export function listShipmentEvents(giftId: number): ShipmentEvent[] {
 		)
 		.all(giftId);
 }
-
-// Re-export for use by webhook handler so it can deserialize cleanly.
-export type { AftershipApiTracking };
