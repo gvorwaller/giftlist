@@ -4,6 +4,8 @@ import { getGiftWithContext, parseDollarsToCents, priceDollarsInput, updateGift 
 import { listPersonOccasions } from '$server/occasions';
 import { getPersonById, listPeople } from '$server/people';
 import { listVendors, getVendorById } from '$server/vendors';
+import { listShippers, getShipperById } from '$server/shippers';
+import { registerWithAftership } from '$server/tracking';
 
 function trim(v: FormDataEntryValue | null): string {
 	return typeof v === 'string' ? v.trim() : '';
@@ -39,11 +41,19 @@ export const load: PageServerLoad = ({ params, locals }) => {
 			? [...activeVendors, currentVendor]
 			: activeVendors;
 
+	const activeShippers = listShippers({ includeArchived: false });
+	const currentShipper = gift.shipper ?? null;
+	const shippers =
+		currentShipper && currentShipper.is_archived === 1
+			? [...activeShippers, currentShipper]
+			: activeShippers;
+
 	return {
 		gift,
 		people: listPeople({ includeArchived: false, sort: 'alphabetical' }),
 		personOccasions: listPersonOccasions(gift.person_id),
 		vendors,
+		shippers,
 		priceInitial: priceDollarsInput(gift.price_cents)
 	};
 };
@@ -81,23 +91,51 @@ export const actions: Actions = {
 			return fail(400, { error: 'Pick a vendor from the list.', values: formValues(fd) });
 		}
 
+		const shipper_id = numOrNull(trim(fd.get('shipper_id')));
+		if (shipper_id != null && !getShipperById(shipper_id)) {
+			return fail(400, { error: 'Pick a shipper from the list.', values: formValues(fd) });
+		}
+
+		const newTracking = nullable(trim(fd.get('tracking_number')));
+		const trackingChanged = newTracking !== gift.tracking_number;
+
 		updateGift(
 			gift.id,
 			{
 				person_id,
 				title,
 				vendor_id,
+				shipper_id,
 				source_url: nullable(trim(fd.get('source_url'))),
 				occasion_id,
 				occasion_year: numOrNull(trim(fd.get('occasion_year'))),
 				order_id: nullable(trim(fd.get('order_id'))),
-				tracking_number: nullable(trim(fd.get('tracking_number'))),
-				carrier: nullable(trim(fd.get('carrier'))),
+				tracking_number: newTracking,
 				price_cents,
-				notes: nullable(trim(fd.get('notes')))
+				notes: nullable(trim(fd.get('notes'))),
+				// If the tracking number changed, clear the AfterShip linkage so
+				// the next save attempt re-registers under the new number.
+				...(trackingChanged
+					? {
+							aftership_tracking_id: null,
+							tracking_status: null,
+							tracking_status_at: null,
+							tracking_estimated_delivery: null
+						}
+					: {})
 			},
 			locals.user.id
 		);
+
+		// Register (or re-register) with AfterShip if there's now a tracking
+		// number and one wasn't previously registered. Fire-and-forget — don't
+		// block the redirect; failures bubble to logs and the next refresh.
+		if (newTracking && process.env.AFTERSHIP_API_KEY) {
+			registerWithAftership(gift.id, locals.user.id).catch((err) => {
+				console.warn('[gifts/edit] AfterShip register failed:', err);
+			});
+		}
+
 		throw redirect(303, `/app/gifts/${gift.id}`);
 	}
 };
@@ -113,7 +151,7 @@ function formValues(fd: FormData): Record<string, string> {
 		'occasion_year',
 		'order_id',
 		'tracking_number',
-		'carrier',
+		'shipper_id',
 		'price',
 		'notes'
 	]) {

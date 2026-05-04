@@ -21,7 +21,7 @@
 			occasion_year: String(data.gift.occasion_year ?? ''),
 			order_id: data.gift.order_id ?? '',
 			tracking_number: data.gift.tracking_number ?? '',
-			carrier: data.gift.carrier ?? '',
+			shipper_id: String(data.gift.shipper_id ?? ''),
 			price: data.priceInitial,
 			notes: data.gift.notes ?? ''
 		};
@@ -37,7 +37,7 @@
 	let occasionYear = $state(initial.occasion_year);
 	let orderId = $state(initial.order_id);
 	let tracking = $state(initial.tracking_number);
-	let carrier = $state(initial.carrier);
+	let shipperId = $state(initial.shipper_id);
 	let price = $state(initial.price);
 	let notes = $state(initial.notes);
 	let submitting = $state(false);
@@ -180,13 +180,15 @@
 				<input name="tracking_number" type="text" bind:value={tracking} />
 			</label>
 			<label>
-				<span>Carrier</span>
-				<input
-					name="carrier"
-					type="text"
-					placeholder="USPS, UPS, FedEx…"
-					bind:value={carrier}
-				/>
+				<span>Shipper</span>
+				<select name="shipper_id" bind:value={shipperId}>
+					<option value="">— pick —</option>
+					{#each data.shippers as s (s.id)}
+						<option value={String(s.id)}>
+							{s.name}{s.is_archived === 1 ? ' (archived)' : ''}
+						</option>
+					{/each}
+				</select>
 			</label>
 		</div>
 

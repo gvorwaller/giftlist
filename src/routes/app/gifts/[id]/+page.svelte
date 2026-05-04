@@ -57,6 +57,19 @@
 		return d.toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric' });
 	}
 
+	function formatDateTime(iso: string | null): string {
+		if (!iso) return '';
+		const normalized = iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z';
+		const d = new Date(normalized);
+		if (isNaN(d.getTime())) return iso;
+		return d.toLocaleString('en-US', {
+			month: 'short',
+			day: 'numeric',
+			hour: 'numeric',
+			minute: '2-digit'
+		});
+	}
+
 	function badgeClass(s: typeof data.gift.status): string {
 		switch (s) {
 			case 'idea':
@@ -166,10 +179,61 @@
 
 	{#if data.gift.tracking_number}
 		<section class="card">
-			<p class="eyebrow">Tracking</p>
-			<p class="body">
-				{data.gift.tracking_number}{#if data.gift.carrier} · {data.gift.carrier}{/if}
-			</p>
+			<div class="tracking-head">
+				<div>
+					<p class="eyebrow">Tracking</p>
+					<p class="body">
+						{data.gift.tracking_number}{#if data.gift.shipper}
+							· {data.gift.shipper.name}
+						{:else if data.gift.carrier}
+							· {data.gift.carrier}
+						{/if}
+					</p>
+					{#if data.gift.tracking_status}
+						<p class="tracking-status">
+							<strong>{data.gift.tracking_status}</strong>
+							{#if data.gift.tracking_status_at}
+								· {formatDateTime(data.gift.tracking_status_at)}
+							{/if}
+						</p>
+					{:else if data.aftershipConfigured && data.gift.aftership_tracking_id}
+						<p class="tracking-status muted">Awaiting first checkpoint…</p>
+					{/if}
+					{#if data.gift.tracking_estimated_delivery}
+						<p class="tracking-eta">
+							ETA {formatTimestamp(data.gift.tracking_estimated_delivery)}
+						</p>
+					{/if}
+				</div>
+				{#if data.aftershipConfigured}
+					<form method="POST" action="?/refreshTracking" class="refresh-form">
+						<button type="submit" class="ghost small">Refresh</button>
+					</form>
+				{/if}
+			</div>
+			{#if form?.trackingError}
+				<p class="tracking-err" role="alert">{form.trackingError}</p>
+			{/if}
+
+			{#if data.shipmentEvents.length > 0}
+				<details class="events">
+					<summary>Journey ({data.shipmentEvents.length})</summary>
+					<ol class="events-list">
+						{#each data.shipmentEvents as ev (ev.id)}
+							<li>
+								<p class="ev-when">{formatDateTime(ev.event_at)}</p>
+								<p class="ev-msg">
+									{#if ev.status}<strong>{ev.status}</strong> — {/if}
+									{ev.message ?? '—'}
+								</p>
+								{#if ev.location}
+									<p class="ev-loc">{ev.location}</p>
+								{/if}
+							</li>
+						{/each}
+					</ol>
+				</details>
+			{/if}
 		</section>
 	{/if}
 
@@ -433,6 +497,112 @@
 		color: var(--rose);
 		font-size: 15px;
 		margin-bottom: 10px;
+	}
+
+	.tracking-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 12px;
+	}
+
+	.tracking-status {
+		margin-top: 6px;
+		font-family: var(--font-sans);
+		font-size: 15px;
+		color: var(--ink);
+	}
+
+	.tracking-status.muted {
+		color: var(--muted);
+		font-style: italic;
+	}
+
+	.tracking-eta {
+		margin-top: 4px;
+		font-family: var(--font-sans);
+		font-size: 13px;
+		color: var(--muted);
+	}
+
+	.tracking-err {
+		margin-top: 8px;
+		color: var(--rose);
+		font-size: 14px;
+	}
+
+	.refresh-form {
+		flex-shrink: 0;
+	}
+
+	.ghost.small {
+		min-height: 36px;
+		padding: 6px 12px;
+		font-size: 13px;
+		background: transparent;
+		color: var(--green);
+		border: 1px solid var(--green);
+		border-radius: var(--radius-control);
+		font-family: var(--font-sans);
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.ghost.small:hover {
+		background: var(--green-soft);
+	}
+
+	.events {
+		margin-top: 14px;
+		border-top: 1px dashed var(--line);
+		padding-top: 12px;
+	}
+
+	.events summary {
+		font-family: var(--font-sans);
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--green);
+		cursor: pointer;
+		padding: 6px 0;
+	}
+
+	.events-list {
+		list-style: none;
+		margin-top: 8px;
+		padding-left: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+
+	.events-list li {
+		padding: 8px 12px;
+		background: var(--bg);
+		border-left: 3px solid var(--green);
+		border-radius: 4px;
+	}
+
+	.ev-when {
+		font-family: var(--font-sans);
+		font-size: 11px;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--muted);
+	}
+
+	.ev-msg {
+		margin-top: 2px;
+		font-family: var(--font-sans);
+		font-size: 14px;
+		color: var(--ink);
+	}
+
+	.ev-loc {
+		margin-top: 2px;
+		font-family: var(--font-sans);
+		font-size: 12px;
+		color: var(--muted);
 	}
 
 	.timeline ul {

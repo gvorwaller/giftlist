@@ -83,8 +83,24 @@ export interface Gift {
 	is_idea: 0 | 1;
 	is_archived: 0 | 1;
 	vendor_id: number | null;
+	shipper_id: number | null;
+	tracking_status: string | null;
+	tracking_status_at: string | null;
+	tracking_estimated_delivery: string | null;
+	aftership_tracking_id: string | null;
 	created_at: string;
 	updated_at: string;
+}
+
+export interface ShipmentEvent {
+	id: number;
+	gift_id: number;
+	event_at: string;
+	status: string | null;
+	message: string | null;
+	location: string | null;
+	raw_json: string | null;
+	created_at: string;
 }
 
 export type DraftType = 'gift';

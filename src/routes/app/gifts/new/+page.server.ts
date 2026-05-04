@@ -5,6 +5,8 @@ import { listPersonOccasions, nextOccurrenceDate } from '$server/occasions';
 import { createGift, parseDollarsToCents } from '$server/gifts';
 import { deleteDraft, getFreshDraft, parseDraftPayload } from '$server/drafts';
 import { listVendors, getVendorById } from '$server/vendors';
+import { listShippers, getShipperById } from '$server/shippers';
+import { registerWithAftership } from '$server/tracking';
 import type { OccasionWithLink } from '$server/occasions';
 
 export interface GiftDraftPayload {
@@ -16,7 +18,7 @@ export interface GiftDraftPayload {
 	occasion_year?: number | null;
 	order_id?: string;
 	tracking_number?: string;
-	carrier?: string;
+	shipper_id?: number | null;
 	price?: string;
 	notes?: string;
 	status?: 'planned' | 'idea';
@@ -74,6 +76,7 @@ export const load: PageServerLoad = ({ locals, url }) => {
 		people,
 		personOccasions,
 		vendors: listVendors({ includeArchived: false }),
+		shippers: listShippers({ includeArchived: false }),
 		prefill,
 		draftUpdatedAt,
 		currentYear: new Date().getFullYear()
@@ -125,18 +128,23 @@ export const actions: Actions = {
 			return fail(400, { error: 'Pick a vendor from the list.', values: formValues(fd) });
 		}
 
+		const shipper_id_raw = numOrNull(trim(fd.get('shipper_id')));
+		if (shipper_id_raw != null && !getShipperById(shipper_id_raw)) {
+			return fail(400, { error: 'Pick a shipper from the list.', values: formValues(fd) });
+		}
+
 		const status = fd.get('status') === 'idea' ? 'idea' : 'planned';
 		const gift = createGift(
 			{
 				person_id,
 				title,
 				vendor_id: vendor_id_raw,
+				shipper_id: shipper_id_raw,
 				source_url: nullable(trim(fd.get('source_url'))),
 				occasion_id: numOrNull(trim(fd.get('occasion_id'))),
 				occasion_year: numOrNull(trim(fd.get('occasion_year'))),
 				order_id: nullable(trim(fd.get('order_id'))),
 				tracking_number: nullable(trim(fd.get('tracking_number'))),
-				carrier: nullable(trim(fd.get('carrier'))),
 				price_cents,
 				notes: nullable(trim(fd.get('notes'))),
 				is_idea: status === 'idea',
@@ -145,6 +153,16 @@ export const actions: Actions = {
 			locals.user.id
 		);
 		deleteDraft(locals.user.id, 'gift');
+
+		// Fire-and-forget AfterShip registration. We don't block the redirect
+		// on the network call — failures are logged and the next manual or
+		// scheduled refresh will pick up the slack.
+		if (gift.tracking_number && process.env.AFTERSHIP_API_KEY) {
+			registerWithAftership(gift.id, locals.user.id).catch((err) => {
+				console.warn('[gifts/new] AfterShip register failed:', err);
+			});
+		}
+
 		throw redirect(303, `/app/gifts/${gift.id}`);
 	},
 
@@ -166,7 +184,7 @@ function formValues(fd: FormData): Record<string, string> {
 		'occasion_year',
 		'order_id',
 		'tracking_number',
-		'carrier',
+		'shipper_id',
 		'price',
 		'notes',
 		'status'

@@ -1,8 +1,10 @@
 import { getDb } from './db';
 import { logAudit } from './audit';
 import { getVendorById } from './vendors';
+import { getShipperById } from './shippers';
 import type { Gift, GiftStatus, Occasion, Person } from './types';
 import type { Vendor } from './vendors';
+import type { Shipper } from './shippers';
 
 export interface GiftCreateInput {
 	person_id: number;
@@ -19,6 +21,7 @@ export interface GiftCreateInput {
 	status?: GiftStatus;
 	is_idea?: boolean;
 	vendor_id?: number | null;
+	shipper_id?: number | null;
 }
 
 export interface GiftUpdateInput {
@@ -34,12 +37,18 @@ export interface GiftUpdateInput {
 	price_cents?: number | null;
 	notes?: string | null;
 	vendor_id?: number | null;
+	shipper_id?: number | null;
+	tracking_status?: string | null;
+	tracking_status_at?: string | null;
+	tracking_estimated_delivery?: string | null;
+	aftership_tracking_id?: string | null;
 }
 
 export interface GiftWithContext extends Gift {
 	person: Person;
 	occasion: Occasion | null;
 	vendor: Vendor | null;
+	shipper: Shipper | null;
 }
 
 export interface ListGiftsOptions {
@@ -90,7 +99,8 @@ export function getGiftWithContext(id: number): GiftWithContext | undefined {
 			null)
 		: null;
 	const vendor = g.vendor_id ? (getVendorById(g.vendor_id) ?? null) : null;
-	return { ...g, person, occasion, vendor };
+	const shipper = g.shipper_id ? (getShipperById(g.shipper_id) ?? null) : null;
+	return { ...g, person, occasion, vendor, shipper };
 }
 
 export function createGift(input: GiftCreateInput, actorUserId: number): Gift {
@@ -107,12 +117,20 @@ export function createGift(input: GiftCreateInput, actorUserId: number): Gift {
 		source = getVendorById(vendor_id)?.name ?? null;
 	}
 
+	// Same denormalization for shipper → legacy carrier text column.
+	let carrier = input.carrier ?? null;
+	const shipper_id = input.shipper_id ?? null;
+	if (shipper_id != null && carrier == null) {
+		carrier = getShipperById(shipper_id)?.name ?? null;
+	}
+
 	const info = db
 		.prepare(
 			`INSERT INTO gifts (
 			   person_id, occasion_id, occasion_year, title, source, source_url,
-			   order_id, tracking_number, carrier, price_cents, status, notes, is_idea, vendor_id
-			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			   order_id, tracking_number, carrier, price_cents, status, notes, is_idea,
+			   vendor_id, shipper_id
+			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.run(
 			input.person_id,
@@ -123,12 +141,13 @@ export function createGift(input: GiftCreateInput, actorUserId: number): Gift {
 			input.source_url ?? null,
 			input.order_id ?? null,
 			input.tracking_number ?? null,
-			input.carrier ?? null,
+			carrier,
 			input.price_cents ?? null,
 			status,
 			input.notes ?? null,
 			is_idea,
-			vendor_id
+			vendor_id,
+			shipper_id
 		);
 	const id = Number(info.lastInsertRowid);
 	const gift = getGiftById(id)!;
@@ -159,7 +178,12 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 		'carrier',
 		'price_cents',
 		'notes',
-		'vendor_id'
+		'vendor_id',
+		'shipper_id',
+		'tracking_status',
+		'tracking_status_at',
+		'tracking_estimated_delivery',
+		'aftership_tracking_id'
 	];
 	const changed: string[] = [];
 	for (const col of columns) {
@@ -183,6 +207,17 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 		}
 	}
 
+	// Same lockstep behavior for shipper_id → legacy carrier text column.
+	if ('shipper_id' in input && !('carrier' in input)) {
+		const newCarrier = merged.shipper_id
+			? (getShipperById(merged.shipper_id)?.name ?? null)
+			: null;
+		if (merged.carrier !== newCarrier) {
+			merged.carrier = newCarrier;
+			if (!changed.includes('carrier')) changed.push('carrier');
+		}
+	}
+
 	// If reassigning to a new person, clear occasion_id unless caller is
 	// explicitly setting one — occasions are linked to a specific person
 	// via person_occasions, so the prior occasion may not apply.
@@ -201,6 +236,8 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 		`UPDATE gifts SET
 		    person_id = ?, title = ?, source = ?, source_url = ?, occasion_id = ?, occasion_year = ?,
 		    order_id = ?, tracking_number = ?, carrier = ?, price_cents = ?, notes = ?, vendor_id = ?,
+		    shipper_id = ?, tracking_status = ?, tracking_status_at = ?,
+		    tracking_estimated_delivery = ?, aftership_tracking_id = ?,
 		    updated_at = CURRENT_TIMESTAMP
 		  WHERE id = ?`
 	).run(
@@ -216,6 +253,11 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 		merged.price_cents,
 		merged.notes,
 		merged.vendor_id,
+		merged.shipper_id,
+		merged.tracking_status,
+		merged.tracking_status_at,
+		merged.tracking_estimated_delivery,
+		merged.aftership_tracking_id,
 		id
 	);
 	const after = getGiftById(id)!;

@@ -121,6 +121,46 @@
 	</section>
 
 	<section class="card">
+		<p class="eyebrow">AfterShip tracking refresh</p>
+		<div class="row">
+			<div>
+				<p class="body">
+					{#if data.tracking.configured}
+						{#if data.tracking.lastRun}
+							Last run: {formatTimestamp(data.tracking.lastRun.started_at)}
+							· <strong class={statusClass(data.tracking.lastRun.status)}>
+								{data.tracking.lastRun.status}
+							</strong>
+						{:else}
+							Never run yet.
+						{/if}
+					{:else}
+						<strong>AfterShip not configured.</strong> Set
+						<code>AFTERSHIP_API_KEY</code> (and optionally
+						<code>AFTERSHIP_WEBHOOK_SECRET</code>) to enable.
+					{/if}
+				</p>
+				<p class="muted">
+					Polls AfterShip for fresh status on every gift with a registered tracking id
+					that hasn't reached a terminal state. Webhooks (if configured) push updates
+					in real time; this job is the catch-up sweep.
+				</p>
+				{#if data.tracking.lastRun?.summary}
+					<p class="muted">{data.tracking.lastRun.summary}</p>
+				{/if}
+				{#if data.tracking.lastRun?.error_message}
+					<p class="err-line">{data.tracking.lastRun.error_message}</p>
+				{/if}
+			</div>
+			<form method="POST" action="?/runTrackingRefreshNow">
+				<button type="submit" class="primary" disabled={!data.tracking.configured}>
+					Refresh tracking now
+				</button>
+			</form>
+		</div>
+	</section>
+
+	<section class="card">
 		<p class="eyebrow">Christmas planning kickoff</p>
 		<div class="row">
 			<div>
@@ -300,6 +340,11 @@
 		font-size: 15px;
 		font-weight: 600;
 		cursor: pointer;
+	}
+
+	.primary:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
 	}
 
 	.runs {

@@ -8,7 +8,9 @@ export type AuditEntityType =
 	| 'draft'
 	| 'user'
 	| 'import'
-	| 'vendor';
+	| 'vendor'
+	| 'shipper'
+	| 'tracking';
 
 export interface AuditInput {
 	actorUserId: number;

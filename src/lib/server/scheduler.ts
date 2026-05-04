@@ -3,6 +3,7 @@ import { runReminderJob } from './jobs/reminders';
 import { runAmazonScan, runProcessedCleanup } from './jobs/amazon-import';
 import { runChristmasKickoffJob } from './jobs/christmas-kickoff';
 import { runBackupJob } from './jobs/backup';
+import { runTrackingRefresh } from './jobs/tracking-refresh';
 import { getDb } from './db';
 
 /**
@@ -21,6 +22,7 @@ let started = false;
 const DEFAULTS = {
 	reminders: '0 8 * * *', // 08:00 daily
 	amazonScan: '30 7 * * *', // 07:30 daily, before reminders so the digest sees fresh pending counts
+	trackingRefresh: '45 7 * * *', // 07:45 daily — right after the Amazon scan, before reminders
 	cleanup: '15 3 * * 0', // 03:15 Sundays
 	christmasKickoff: '0 8 1 9 *', // Sept 1 at 08:00 — wife's gift-shopping kickoff
 	backup: '0 2 * * *' // 02:00 daily — quiet hours, before any other job runs
@@ -82,6 +84,22 @@ export function startScheduler(): void {
 		}
 	});
 	console.log(`[scheduler] registered amazon.scan (${amazonScanCron})`);
+
+	const trackingRefreshCron = expr('TRACKING_REFRESH_CRON', DEFAULTS.trackingRefresh);
+	cron.schedule(trackingRefreshCron, async () => {
+		const userId = getAdminUserId();
+		if (!userId) {
+			console.warn('[cron] tracking.refresh skipped — no admin user');
+			return;
+		}
+		console.log('[cron] tracking.refresh firing');
+		try {
+			await runTrackingRefresh(userId);
+		} catch (err) {
+			console.error('[cron] tracking.refresh failed:', err);
+		}
+	});
+	console.log(`[scheduler] registered tracking.refresh (${trackingRefreshCron})`);
 
 	const cleanupCron = expr('AMAZON_CLEANUP_CRON', DEFAULTS.cleanup);
 	cron.schedule(cleanupCron, async () => {

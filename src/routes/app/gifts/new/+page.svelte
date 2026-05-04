@@ -26,7 +26,7 @@
 			occasion_year: String(data.prefill.occasion_year ?? data.currentYear),
 			order_id: data.prefill.order_id ?? '',
 			tracking_number: data.prefill.tracking_number ?? '',
-			carrier: data.prefill.carrier ?? '',
+			shipper_id: String(data.prefill.shipper_id ?? ''),
 			price: data.prefill.price ?? '',
 			notes: data.prefill.notes ?? '',
 			status: data.prefill.status ?? 'planned'
@@ -42,7 +42,7 @@
 	let occasionYear = $state(initial.occasion_year);
 	let orderId = $state(initial.order_id);
 	let tracking = $state(initial.tracking_number);
-	let carrier = $state(initial.carrier);
+	let shipperId = $state(initial.shipper_id);
 	let price = $state(initial.price);
 	let notes = $state(initial.notes);
 	let isIdea = $state(initial.status === 'idea');
@@ -79,7 +79,7 @@
 			occasion_year: occasionYear ? Number(occasionYear) : null,
 			order_id: orderId,
 			tracking_number: tracking,
-			carrier,
+			shipper_id: shipperId ? Number(shipperId) : null,
 			price,
 			notes,
 			status: isIdea ? 'idea' : 'planned'
@@ -94,6 +94,7 @@
 				s.occasion_id ||
 				s.order_id?.trim() ||
 				s.tracking_number?.trim() ||
+				(s.shipper_id && s.shipper_id > 0) ||
 				s.price?.trim() ||
 				s.notes?.trim()
 		);
@@ -309,14 +310,13 @@
 					<input name="tracking_number" type="text" bind:value={tracking} oninput={onInput} />
 				</label>
 				<label>
-					<span>Carrier</span>
-					<input
-						name="carrier"
-						type="text"
-						placeholder="USPS, UPS…"
-						bind:value={carrier}
-						oninput={onInput}
-					/>
+					<span>Shipper</span>
+					<select name="shipper_id" bind:value={shipperId} oninput={onInput}>
+						<option value="">— pick —</option>
+						{#each data.shippers as s (s.id)}
+							<option value={String(s.id)}>{s.name}</option>
+						{/each}
+					</select>
 				</label>
 			</div>
 

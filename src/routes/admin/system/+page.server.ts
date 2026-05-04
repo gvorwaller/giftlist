@@ -7,6 +7,8 @@ import {
 	runChristmasKickoffJob
 } from '$server/jobs/christmas-kickoff';
 import { JOB_NAME as BACKUP_JOB, runBackupJob } from '$server/jobs/backup';
+import { TRACKING_REFRESH_JOB, runTrackingRefresh } from '$server/jobs/tracking-refresh';
+import { isAftershipConfigured } from '$server/tracking';
 import { lastBackupIso } from '$server/admin-home';
 import { configuredChannels } from '$server/notify';
 
@@ -17,6 +19,7 @@ export const load: PageServerLoad = ({ locals }) => {
 	const reminderLast = getLastRun(REMINDER_JOB);
 	const christmasLast = getLastRun(CHRISTMAS_JOB);
 	const backupLast = getLastRun(BACKUP_JOB);
+	const trackingLast = getLastRun(TRACKING_REFRESH_JOB);
 
 	return {
 		recentRuns,
@@ -33,6 +36,11 @@ export const load: PageServerLoad = ({ locals }) => {
 			path: './data/backup/gifttracker.db',
 			lastAt: lastBackupIso(),
 			lastRun: backupLast ?? null
+		},
+		tracking: {
+			name: TRACKING_REFRESH_JOB,
+			lastRun: trackingLast ?? null,
+			configured: isAftershipConfigured()
 		}
 	};
 };
@@ -74,6 +82,24 @@ export const actions: Actions = {
 				return fail(500, { error: result.error?.message ?? 'Unknown failure' });
 			}
 			return { ok: true, summary: `Backup snapshot written (run ${result.runId})` };
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return fail(409, { error: message });
+		}
+	},
+
+	runTrackingRefreshNow: async ({ locals }) => {
+		if (!locals.user) throw redirect(303, '/login');
+		try {
+			const result = await runTrackingRefresh(locals.user.id);
+			if (result.status === 'error') {
+				return fail(500, { error: result.error?.message ?? 'Unknown failure' });
+			}
+			const r = result.result!;
+			const summary = r.skipped
+				? 'Skipped — AfterShip not configured'
+				: `Checked ${r.checked} in-flight, ${r.updated} updated, ${r.failed} failed`;
+			return { ok: true, summary };
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			return fail(409, { error: message });

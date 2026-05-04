@@ -3,6 +3,12 @@ import type { Actions, PageServerLoad } from './$types';
 import { archiveGift, getGiftWithContext } from '$server/gifts';
 import { transitionGift, canTransition } from '$server/gift-status';
 import { recordView } from '$server/recently-viewed';
+import {
+	isAftershipConfigured,
+	listShipmentEvents,
+	pullStatus,
+	registerWithAftership
+} from '$server/tracking';
 import type { GiftStatus } from '$server/types';
 
 function requireGift(params: { id: string }) {
@@ -23,7 +29,11 @@ export const load: PageServerLoad = ({ params, locals }) => {
 			`${gift.title} for ${gift.person.display_name}`
 		);
 	}
-	return { gift };
+	return {
+		gift,
+		shipmentEvents: listShipmentEvents(gift.id),
+		aftershipConfigured: isAftershipConfigured()
+	};
 };
 
 async function doTransition(
@@ -78,6 +88,33 @@ export const actions: Actions = {
 		if (!locals.user) throw redirect(303, '/login');
 		const gift = requireGift(params);
 		archiveGift(gift.id, false, locals.user.id);
+		throw redirect(303, `/app/gifts/${gift.id}`);
+	},
+
+	// Ad-hoc tracking refresh — pulls fresh AfterShip status for this single
+	// gift. Registers first if no aftership_tracking_id is set yet (and a
+	// tracking number exists). Surfaces success/failure inline rather than as
+	// a flash so it's clear what happened.
+	refreshTracking: async ({ params, locals }) => {
+		if (!locals.user) throw redirect(303, '/login');
+		const gift = requireGift(params);
+		if (!isAftershipConfigured()) {
+			return fail(503, { trackingError: 'AfterShip not configured.' });
+		}
+		try {
+			if (!gift.aftership_tracking_id) {
+				if (!gift.tracking_number) {
+					return fail(400, { trackingError: 'No tracking number on this gift yet.' });
+				}
+				await registerWithAftership(gift.id, locals.user.id);
+			} else {
+				await pullStatus(gift.id, locals.user.id);
+			}
+		} catch (err) {
+			return fail(502, {
+				trackingError: err instanceof Error ? err.message : 'Tracking refresh failed.'
+			});
+		}
 		throw redirect(303, `/app/gifts/${gift.id}`);
 	}
 };

@@ -1,12 +1,13 @@
 <script lang="ts">
-	import type { PageData } from './$types';
+	import type { ActionData, PageData } from './$types';
 	import { managerLabel } from '$lib/gift-status';
 
 	interface Props {
 		data: PageData;
+		form: ActionData;
 	}
 
-	let { data }: Props = $props();
+	let { data, form }: Props = $props();
 
 	function trackingLabel(g: (typeof data.inFlight)[number]): string | null {
 		if (!g.tracking_number && !g.carrier) return null;
@@ -14,6 +15,11 @@
 		if (g.carrier) bits.push(g.carrier);
 		if (g.tracking_number) bits.push(g.tracking_number);
 		return bits.join(' · ');
+	}
+
+	function carrierStatus(g: (typeof data.inFlight)[number]): string | null {
+		if (!g.tracking_status) return null;
+		return g.tracking_status;
 	}
 </script>
 
@@ -28,6 +34,19 @@
 		<p class="subtitle">
 			Bought, not yet delivered. Tap a row for status, or the pencil to edit.
 		</p>
+		{#if data.aftershipConfigured && data.inFlight.length > 0}
+			<form method="POST" action="?/refreshAll" class="refresh-row">
+				<button type="submit" class="ghost small">Refresh all tracking</button>
+				{#if form?.ok}
+					<span class="refresh-result" role="status">
+						Checked {form.checked}, updated {form.updated}{#if form.failed > 0}, {form.failed}
+							failed{/if}.
+					</span>
+				{:else if form?.trackingError}
+					<span class="refresh-err" role="alert">{form.trackingError}</span>
+				{/if}
+			</form>
+		{/if}
 	</header>
 
 	{#if data.inFlight.length === 0}
@@ -44,6 +63,9 @@
 							<p class="meta">For {g.person_display_name}</p>
 							{#if trackingLabel(g)}
 								<p class="tracking">{trackingLabel(g)}</p>
+							{/if}
+							{#if carrierStatus(g)}
+								<p class="carrier-status">Carrier: {carrierStatus(g)}</p>
 							{/if}
 						</div>
 						<span class="pill attention">{managerLabel(g.status)}</span>
@@ -179,6 +201,51 @@
 		font-family: 'SF Mono', ui-monospace, monospace;
 		font-size: 12px;
 		color: var(--muted);
+	}
+
+	.carrier-status {
+		margin-top: 4px;
+		font-family: var(--font-sans);
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--green);
+	}
+
+	.refresh-row {
+		margin-top: 12px;
+		display: flex;
+		gap: 10px;
+		align-items: center;
+		flex-wrap: wrap;
+	}
+
+	.ghost.small {
+		min-height: 36px;
+		padding: 6px 14px;
+		font-size: 13px;
+		background: transparent;
+		color: var(--green);
+		border: 1px solid var(--green);
+		border-radius: var(--radius-control);
+		font-family: var(--font-sans);
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.ghost.small:hover {
+		background: var(--green-soft);
+	}
+
+	.refresh-result {
+		font-family: var(--font-sans);
+		font-size: 13px;
+		color: var(--muted);
+	}
+
+	.refresh-err {
+		font-family: var(--font-sans);
+		font-size: 13px;
+		color: var(--rose);
 	}
 
 	.pill {
