@@ -85,7 +85,29 @@
 			<a href="/app/people/{data.gift.person.id}">{data.gift.person.display_name}</a> /
 			<span>Gift</span>
 		</p>
-		<h1>{data.gift.title}</h1>
+		<div class="title-row">
+			<h1>{data.gift.title}</h1>
+			{#if !isArchived}
+				<a href="/app/gifts/{data.gift.id}/edit" class="edit-btn" aria-label="Edit gift details">
+					<svg
+						width="18"
+						height="18"
+						viewBox="0 0 20 20"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.6"
+						aria-hidden="true"
+					>
+						<path
+							d="M14 2.5l3.5 3.5-9.5 9.5H4.5v-3.5l9.5-9.5z"
+							stroke-linejoin="round"
+							stroke-linecap="round"
+						/>
+					</svg>
+					<span>Edit</span>
+				</a>
+			{/if}
+		</div>
 		<div class={badgeClass(data.gift.status)} aria-label="Status">
 			<span aria-hidden="true" class="dot"></span>
 			{statusLabel}
@@ -136,10 +158,6 @@
 				<button type="submit" class="ghost danger">Mark Returned</button>
 			</form>
 		{/if}
-
-		<p class="edit-link">
-			<a href="/app/gifts/{data.gift.id}/edit">Edit details</a>
-		</p>
 	{/if}
 
 	{#if data.gift.tracking_number}
@@ -231,10 +249,39 @@
 		color: var(--muted);
 	}
 
-	h1 {
+	.title-row {
 		margin-top: 6px;
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	h1 {
 		font-size: 30px;
 		line-height: 1.1;
+		flex: 1;
+	}
+
+	.edit-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 8px 14px;
+		min-height: var(--tap-target);
+		flex-shrink: 0;
+		background: var(--paper);
+		color: var(--green);
+		border: 1px solid var(--green);
+		border-radius: var(--radius-control);
+		font-family: var(--font-sans);
+		font-size: 14px;
+		font-weight: 600;
+		text-decoration: none;
+	}
+
+	.edit-btn:hover {
+		background: var(--green-soft);
 	}
 
 	.badge {
@@ -376,23 +423,6 @@
 		color: var(--muted);
 		padding: 14px 0;
 		text-align: center;
-	}
-
-	.edit-link {
-		text-align: center;
-		margin: 6px 0 14px;
-	}
-
-	.edit-link a {
-		font-family: var(--font-sans);
-		font-size: 14px;
-		font-weight: 600;
-		color: var(--green);
-		text-decoration: underline;
-		padding: 8px 12px;
-		display: inline-block;
-		min-height: var(--tap-target);
-		line-height: 32px;
 	}
 
 	.error {

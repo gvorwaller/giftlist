@@ -8,7 +8,7 @@
 
 	let { data }: Props = $props();
 
-	function trackingLabel(g: (typeof data.onTheWay)[number]): string | null {
+	function trackingLabel(g: (typeof data.inFlight)[number]): string | null {
 		if (!g.tracking_number && !g.carrier) return null;
 		const bits: string[] = [];
 		if (g.carrier) bits.push(g.carrier);
@@ -23,55 +23,55 @@
 
 <main class="packages">
 	<header class="page-header">
-		<p class="eyebrow">Packages</p>
-		<h1>What's on its way?</h1>
+		<p class="eyebrow">In flight</p>
+		<h1>Packages on the way</h1>
+		<p class="subtitle">
+			Bought, not yet delivered. Tap a row for status, or the pencil to edit.
+		</p>
 	</header>
 
-	{#if data.onTheWay.length === 0 && data.arrived.length === 0}
+	{#if data.inFlight.length === 0}
 		<section class="card empty">
-			<p>Nothing shipping right now.</p>
+			<p>Nothing on its way right now.</p>
 		</section>
-	{/if}
-
-	{#if data.onTheWay.length > 0}
-		<section class="card">
-			<p class="section-eyebrow">On the way</p>
-			<ul class="list">
-				{#each data.onTheWay as g (g.id)}
-					<li>
-						<a href="/app/gifts/{g.id}" class="row">
-							<div>
-								<p class="title">{g.title}</p>
-								<p class="meta">For {g.person_display_name}</p>
-								{#if trackingLabel(g)}
-									<p class="tracking">{trackingLabel(g)}</p>
-								{/if}
-							</div>
-							<span class="pill attention">{managerLabel(g.status)}</span>
-						</a>
-					</li>
-				{/each}
-			</ul>
-		</section>
-	{/if}
-
-	{#if data.arrived.length > 0}
-		<section class="card">
-			<p class="section-eyebrow">Arrived — waiting to wrap</p>
-			<ul class="list">
-				{#each data.arrived as g (g.id)}
-					<li>
-						<a href="/app/gifts/{g.id}" class="row">
-							<div>
-								<p class="title">{g.title}</p>
-								<p class="meta">For {g.person_display_name}</p>
-							</div>
-							<span class="pill good">{managerLabel(g.status)}</span>
-						</a>
-					</li>
-				{/each}
-			</ul>
-		</section>
+	{:else}
+		<ul class="list">
+			{#each data.inFlight as g (g.id)}
+				<li class="row-card">
+					<a href="/app/gifts/{g.id}" class="row-main">
+						<div class="row-text">
+							<p class="title">{g.title}</p>
+							<p class="meta">For {g.person_display_name}</p>
+							{#if trackingLabel(g)}
+								<p class="tracking">{trackingLabel(g)}</p>
+							{/if}
+						</div>
+						<span class="pill attention">{managerLabel(g.status)}</span>
+					</a>
+					<a
+						href="/app/gifts/{g.id}/edit"
+						class="row-edit"
+						aria-label="Edit {g.title}"
+					>
+						<svg
+							width="20"
+							height="20"
+							viewBox="0 0 20 20"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="1.6"
+							aria-hidden="true"
+						>
+							<path
+								d="M14 2.5l3.5 3.5-9.5 9.5H4.5v-3.5l9.5-9.5z"
+								stroke-linejoin="round"
+								stroke-linecap="round"
+							/>
+						</svg>
+					</a>
+				</li>
+			{/each}
+		</ul>
 	{/if}
 </main>
 
@@ -101,22 +101,19 @@
 		line-height: 1.1;
 	}
 
+	.subtitle {
+		margin-top: 8px;
+		font-family: var(--font-sans);
+		font-size: 14px;
+		color: var(--muted);
+	}
+
 	.card {
 		background: var(--paper);
 		border: 1px solid var(--line);
 		border-radius: var(--radius-card);
 		box-shadow: var(--shadow);
 		padding: 20px;
-		margin-bottom: 12px;
-	}
-
-	.section-eyebrow {
-		font-family: var(--font-sans);
-		font-size: 12px;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--green);
 		margin-bottom: 12px;
 	}
 
@@ -131,24 +128,38 @@
 		list-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
+		gap: 10px;
 	}
 
-	.row {
+	.row-card {
+		display: flex;
+		align-items: stretch;
+		gap: 6px;
+	}
+
+	.row-main {
+		flex: 1;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
 		gap: 12px;
 		padding: 14px 16px;
-		background: var(--bg);
+		background: var(--paper);
 		border: 1px solid var(--line);
 		border-radius: var(--radius-control);
 		color: var(--ink);
 		text-decoration: none;
+		min-height: 56px;
+		box-shadow: var(--shadow);
 	}
 
-	.row:hover {
+	.row-main:hover {
 		border-color: var(--green);
+	}
+
+	.row-text {
+		min-width: 0;
+		flex: 1;
 	}
 
 	.title {
@@ -186,8 +197,21 @@
 		color: var(--amber);
 	}
 
-	.pill.good {
-		background: var(--green-soft);
+	.row-edit {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 48px;
+		flex-shrink: 0;
+		background: var(--paper);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		color: var(--muted);
+		box-shadow: var(--shadow);
+	}
+
+	.row-edit:hover {
 		color: var(--green);
+		border-color: var(--green);
 	}
 </style>

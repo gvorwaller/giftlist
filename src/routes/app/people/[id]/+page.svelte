@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { PageData } from './$types';
+	import { managerLabel } from '$lib/gift-status';
+	import type { GiftStatus } from '$server/types';
 
 	interface Props {
 		data: PageData;
@@ -24,6 +26,51 @@
 		if (cents == null) return '';
 		return `$${(cents / 100).toFixed(2)}`;
 	}
+
+	function badgeTone(s: GiftStatus): 'neutral' | 'attention' | 'good' | 'danger' {
+		switch (s) {
+			case 'idea':
+			case 'planned':
+				return 'neutral';
+			case 'ordered':
+			case 'shipped':
+			case 'delivered':
+				return 'attention';
+			case 'wrapped':
+			case 'given':
+				return 'good';
+			case 'returned':
+				return 'danger';
+		}
+	}
+
+	const ACTIVE_STATUSES: GiftStatus[] = [
+		'idea',
+		'planned',
+		'ordered',
+		'shipped',
+		'delivered',
+		'wrapped'
+	];
+	const STATUS_ORDER: Record<GiftStatus, number> = {
+		idea: 0,
+		planned: 1,
+		ordered: 2,
+		shipped: 3,
+		delivered: 4,
+		wrapped: 5,
+		given: 6,
+		returned: 7
+	};
+
+	const activeGifts = $derived(
+		[...data.person.gifts]
+			.filter((g) => ACTIVE_STATUSES.includes(g.status))
+			.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status])
+	);
+	const pastGifts = $derived(
+		data.person.gifts.filter((g) => g.status === 'given' || g.status === 'returned')
+	);
 </script>
 
 <svelte:head>
@@ -65,16 +112,106 @@
 
 	<a class="add-gift" href="/app/gifts/new?person={data.person.id}">Add a gift</a>
 
-	{#if data.person.lastGift}
+	{#if activeGifts.length > 0}
 		<section class="card">
-			<p class="eyebrow">Last gift</p>
-			<p class="body">
-				<strong>{data.person.lastGift.title}</strong>
-				{#if data.person.lastGift.price_cents}
-					· {priceDollars(data.person.lastGift.price_cents)}
-				{/if}
-			</p>
-			<p class="subbody">Status: {data.person.lastGift.status}</p>
+			<p class="eyebrow">Active gifts</p>
+			<ul class="gift-list">
+				{#each activeGifts as g (g.id)}
+					<li class="gift-row">
+						<a href="/app/gifts/{g.id}" class="gift-main">
+							<div class="gift-text">
+								<p class="gift-title">{g.title}</p>
+								<p class="gift-meta">
+									{#if g.occasion_title}
+										{g.occasion_title}{#if g.occasion_year} {g.occasion_year}{/if}
+									{/if}
+									{#if g.occasion_title && g.price_cents}
+										·
+									{/if}
+									{#if g.price_cents}{priceDollars(g.price_cents)}{/if}
+								</p>
+							</div>
+							<span class="pill pill-{badgeTone(g.status)}">{managerLabel(g.status)}</span>
+						</a>
+						<a
+							href="/app/gifts/{g.id}/edit"
+							class="gift-edit"
+							aria-label="Edit {g.title}"
+						>
+							<svg
+								width="20"
+								height="20"
+								viewBox="0 0 20 20"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.6"
+								aria-hidden="true"
+							>
+								<path
+									d="M14 2.5l3.5 3.5-9.5 9.5H4.5v-3.5l9.5-9.5z"
+									stroke-linejoin="round"
+									stroke-linecap="round"
+								/>
+							</svg>
+						</a>
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+
+	{#if pastGifts.length > 0}
+		<section class="card">
+			<p class="eyebrow">Given &amp; returned</p>
+			<ul class="gift-list">
+				{#each pastGifts as g (g.id)}
+					<li class="gift-row">
+						<a href="/app/gifts/{g.id}" class="gift-main">
+							<div class="gift-text">
+								<p class="gift-title">{g.title}</p>
+								<p class="gift-meta">
+									{#if g.occasion_title}
+										{g.occasion_title}{#if g.occasion_year} {g.occasion_year}{/if}
+									{/if}
+									{#if g.occasion_title && g.price_cents}
+										·
+									{/if}
+									{#if g.price_cents}{priceDollars(g.price_cents)}{/if}
+								</p>
+							</div>
+							<span class="pill pill-{badgeTone(g.status)}">{managerLabel(g.status)}</span>
+						</a>
+						<a
+							href="/app/gifts/{g.id}/edit"
+							class="gift-edit"
+							aria-label="Edit {g.title}"
+						>
+							<svg
+								width="20"
+								height="20"
+								viewBox="0 0 20 20"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.6"
+								aria-hidden="true"
+							>
+								<path
+									d="M14 2.5l3.5 3.5-9.5 9.5H4.5v-3.5l9.5-9.5z"
+									stroke-linejoin="round"
+									stroke-linecap="round"
+								/>
+							</svg>
+						</a>
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+
+	{#if data.person.gifts.length === 0}
+		<section class="card">
+			<p class="eyebrow">Gifts</p>
+			<p class="body muted">No gifts yet for {data.person.display_name}.</p>
 		</section>
 	{/if}
 
@@ -234,5 +371,110 @@
 		font-family: var(--font-sans);
 		font-size: 13px;
 		color: var(--muted);
+	}
+
+	.body.muted {
+		color: var(--muted);
+		font-size: 16px;
+	}
+
+	.gift-list {
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.gift-row {
+		display: flex;
+		align-items: stretch;
+		gap: 6px;
+	}
+
+	.gift-main {
+		flex: 1;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 12px;
+		padding: 12px 14px;
+		background: var(--bg);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		color: var(--ink);
+		text-decoration: none;
+		min-height: 56px;
+	}
+
+	.gift-main:hover {
+		border-color: var(--green);
+	}
+
+	.gift-text {
+		min-width: 0;
+		flex: 1;
+	}
+
+	.gift-title {
+		font-family: var(--font-serif);
+		font-size: 18px;
+		line-height: 1.2;
+	}
+
+	.gift-meta {
+		margin-top: 2px;
+		font-family: var(--font-sans);
+		font-size: 13px;
+		color: var(--muted);
+	}
+
+	.gift-edit {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 48px;
+		min-height: 56px;
+		flex-shrink: 0;
+		background: var(--bg);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		color: var(--muted);
+	}
+
+	.gift-edit:hover {
+		color: var(--green);
+		border-color: var(--green);
+	}
+
+	.pill {
+		padding: 4px 10px;
+		border-radius: var(--radius-pill);
+		font-family: var(--font-sans);
+		font-size: 12px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		flex-shrink: 0;
+	}
+
+	.pill-neutral {
+		background: var(--bg);
+		color: var(--muted);
+		border: 1px solid var(--line);
+	}
+
+	.pill-attention {
+		background: var(--amber-soft);
+		color: var(--amber);
+	}
+
+	.pill-good {
+		background: var(--green-soft);
+		color: var(--green);
+	}
+
+	.pill-danger {
+		background: #fde9e6;
+		color: var(--rose);
 	}
 </style>

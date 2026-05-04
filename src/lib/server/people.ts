@@ -27,6 +27,14 @@ export interface PersonWithContext extends Person {
 	lastGift: Gift | null;
 }
 
+export interface GiftWithOccasion extends Gift {
+	occasion_title: string | null;
+}
+
+export interface PersonDetail extends PersonWithContext {
+	gifts: GiftWithOccasion[];
+}
+
 export interface ListPeopleOptions {
 	search?: string;
 	includeArchived?: boolean;
@@ -101,14 +109,28 @@ export function getPersonById(id: number): Person | undefined {
 	return db.prepare<[number], Person>('SELECT * FROM people WHERE id = ?').get(id);
 }
 
-export function getPersonWithContext(id: number): PersonWithContext | undefined {
+export function getPersonWithContext(id: number): PersonDetail | undefined {
 	const person = getPersonById(id);
 	if (!person) return undefined;
 	return {
 		...person,
 		nextOccasion: computeNextOccasionForPerson(person.id),
-		lastGift: computeLastGiftForPerson(person.id)
+		lastGift: computeLastGiftForPerson(person.id),
+		gifts: listGiftsForPerson(person.id)
 	};
+}
+
+export function listGiftsForPerson(personId: number): GiftWithOccasion[] {
+	const db = getDb();
+	return db
+		.prepare<[number], GiftWithOccasion>(
+			`SELECT g.*, o.title AS occasion_title
+			   FROM gifts g
+			   LEFT JOIN occasions o ON o.id = g.occasion_id
+			  WHERE g.person_id = ? AND g.is_archived = 0
+			  ORDER BY g.updated_at DESC`
+		)
+		.all(personId);
 }
 
 export function createPerson(input: PersonUpsertInput, actorUserId: number): Person {
