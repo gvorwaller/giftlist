@@ -146,7 +146,7 @@
 		{/if}
 
 		<div class="occ-add">
-			<details class="add-block">
+			<details class="add-block" open={form?.scope === 'birthday'}>
 				<summary>Add birthday</summary>
 				<form method="POST" action="?/addBirthday" class="inline-form">
 					<div class="row">
@@ -166,11 +166,14 @@
 					{#if form?.scope === 'birthday' && form.error}
 						<p class="error" role="alert">{form.error}</p>
 					{/if}
+					{#if form?.scope === 'birthday' && form.ok}
+						<p class="ok" role="status">Birthday saved.</p>
+					{/if}
 					<button type="submit" class="primary">Save birthday</button>
 				</form>
 			</details>
 
-			<details class="add-block">
+			<details class="add-block" open={form?.scope === 'occasion'}>
 				<summary>Assign shared occasion</summary>
 				<form method="POST" action="?/assignShared" class="inline-form">
 					<label>
@@ -189,11 +192,14 @@
 					{#if form?.scope === 'occasion' && form.error}
 						<p class="error" role="alert">{form.error}</p>
 					{/if}
+					{#if form?.scope === 'occasion' && form.ok}
+						<p class="ok" role="status">Occasion assigned.</p>
+					{/if}
 					<button type="submit" class="primary">Assign</button>
 				</form>
 			</details>
 
-			<details class="add-block">
+			<details class="add-block" open={form?.scope === 'custom'}>
 				<summary>Add custom occasion (anniversary, name day, …)</summary>
 				<form method="POST" action="?/addCustom" class="inline-form">
 					<label>
@@ -236,6 +242,9 @@
 					</label>
 					{#if form?.scope === 'custom' && form.error}
 						<p class="error" role="alert">{form.error}</p>
+					{/if}
+					{#if form?.scope === 'custom' && form.ok}
+						<p class="ok" role="status">Occasion saved.</p>
 					{/if}
 					<button type="submit" class="primary">Save occasion</button>
 				</form>
