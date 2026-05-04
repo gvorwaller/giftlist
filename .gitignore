@@ -10,6 +10,9 @@
 .sidecar-base
 .td-root
 
+# Claude Code Dispatch worktrees (created in-tree as separate git checkouts)
+.claude/worktrees/
+
 # Node / SvelteKit
 node_modules/
 /build
