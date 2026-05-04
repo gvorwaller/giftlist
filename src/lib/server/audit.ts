@@ -7,7 +7,8 @@ export type AuditEntityType =
 	| 'gift'
 	| 'draft'
 	| 'user'
-	| 'import';
+	| 'import'
+	| 'vendor';
 
 export interface AuditInput {
 	actorUserId: number;

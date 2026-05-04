@@ -82,6 +82,7 @@ export interface Gift {
 	notes: string | null;
 	is_idea: 0 | 1;
 	is_archived: 0 | 1;
+	vendor_id: number | null;
 	created_at: string;
 	updated_at: string;
 }

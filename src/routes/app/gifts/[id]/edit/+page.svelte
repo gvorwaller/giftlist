@@ -15,7 +15,7 @@
 		return {
 			person_id: String(data.gift.person_id),
 			title: data.gift.title ?? '',
-			source: data.gift.source ?? '',
+			vendor_id: String(data.gift.vendor_id ?? ''),
 			source_url: data.gift.source_url ?? '',
 			occasion_id: String(data.gift.occasion_id ?? ''),
 			occasion_year: String(data.gift.occasion_year ?? ''),
@@ -31,7 +31,7 @@
 
 	let personId = $state(initial.person_id);
 	let title = $state(initial.title);
-	let source = $state(initial.source);
+	let vendorId = $state(initial.vendor_id);
 	let sourceUrl = $state(initial.source_url);
 	let occasionId = $state(initial.occasion_id);
 	let occasionYear = $state(initial.occasion_year);
@@ -107,13 +107,17 @@
 
 		<label class="big">
 			<span>Where from?</span>
-			<input
-				name="source"
-				type="text"
-				autocomplete="off"
-				bind:value={source}
-				placeholder="Amazon, Etsy, a local shop…"
-			/>
+			<select name="vendor_id" bind:value={vendorId}>
+				<option value="">— pick a vendor —</option>
+				{#each data.vendors as v (v.id)}
+					<option value={String(v.id)}>
+						{v.name}{v.is_archived === 1 ? ' (archived)' : ''}
+					</option>
+				{/each}
+			</select>
+			{#if data.vendors.length === 0}
+				<span class="hint">No vendors yet — admin can add one in Admin → Vendors.</span>
+			{/if}
 		</label>
 
 		<label>
@@ -301,6 +305,13 @@
 	.error {
 		color: var(--rose);
 		font-size: 15px;
+	}
+
+	label .hint {
+		font-family: var(--font-sans);
+		font-size: 13px;
+		font-weight: 400;
+		color: var(--muted);
 	}
 
 	.reassign-note {

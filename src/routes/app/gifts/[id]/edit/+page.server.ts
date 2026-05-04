@@ -3,6 +3,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { getGiftWithContext, parseDollarsToCents, priceDollarsInput, updateGift } from '$server/gifts';
 import { listPersonOccasions } from '$server/occasions';
 import { getPersonById, listPeople } from '$server/people';
+import { listVendors, getVendorById } from '$server/vendors';
 
 function trim(v: FormDataEntryValue | null): string {
 	return typeof v === 'string' ? v.trim() : '';
@@ -29,10 +30,20 @@ function requireGift(params: { id: string }) {
 export const load: PageServerLoad = ({ params, locals }) => {
 	if (!locals.user) throw redirect(303, '/login');
 	const gift = requireGift(params);
+	// Always include the gift's currently-linked vendor in the dropdown even
+	// if it's archived, so editing an old gift doesn't silently lose the link.
+	const activeVendors = listVendors({ includeArchived: false });
+	const currentVendor = gift.vendor ?? null;
+	const vendors =
+		currentVendor && currentVendor.is_archived === 1
+			? [...activeVendors, currentVendor]
+			: activeVendors;
+
 	return {
 		gift,
 		people: listPeople({ includeArchived: false, sort: 'alphabetical' }),
 		personOccasions: listPersonOccasions(gift.person_id),
+		vendors,
 		priceInitial: priceDollarsInput(gift.price_cents)
 	};
 };
@@ -65,12 +76,17 @@ export const actions: Actions = {
 		const personChanged = person_id !== gift.person_id;
 		const occasion_id = personChanged ? null : numOrNull(trim(fd.get('occasion_id')));
 
+		const vendor_id = numOrNull(trim(fd.get('vendor_id')));
+		if (vendor_id != null && !getVendorById(vendor_id)) {
+			return fail(400, { error: 'Pick a vendor from the list.', values: formValues(fd) });
+		}
+
 		updateGift(
 			gift.id,
 			{
 				person_id,
 				title,
-				source: nullable(trim(fd.get('source'))),
+				vendor_id,
 				source_url: nullable(trim(fd.get('source_url'))),
 				occasion_id,
 				occasion_year: numOrNull(trim(fd.get('occasion_year'))),
@@ -91,7 +107,7 @@ function formValues(fd: FormData): Record<string, string> {
 	for (const key of [
 		'person_id',
 		'title',
-		'source',
+		'vendor_id',
 		'source_url',
 		'occasion_id',
 		'occasion_year',

@@ -1,6 +1,8 @@
 import { getDb } from './db';
 import { logAudit } from './audit';
+import { getVendorById } from './vendors';
 import type { Gift, GiftStatus, Occasion, Person } from './types';
+import type { Vendor } from './vendors';
 
 export interface GiftCreateInput {
 	person_id: number;
@@ -16,6 +18,7 @@ export interface GiftCreateInput {
 	notes?: string | null;
 	status?: GiftStatus;
 	is_idea?: boolean;
+	vendor_id?: number | null;
 }
 
 export interface GiftUpdateInput {
@@ -30,11 +33,13 @@ export interface GiftUpdateInput {
 	carrier?: string | null;
 	price_cents?: number | null;
 	notes?: string | null;
+	vendor_id?: number | null;
 }
 
 export interface GiftWithContext extends Gift {
 	person: Person;
 	occasion: Occasion | null;
+	vendor: Vendor | null;
 }
 
 export interface ListGiftsOptions {
@@ -84,26 +89,37 @@ export function getGiftWithContext(id: number): GiftWithContext | undefined {
 		? (db.prepare<[number], Occasion>('SELECT * FROM occasions WHERE id = ?').get(g.occasion_id) ??
 			null)
 		: null;
-	return { ...g, person, occasion };
+	const vendor = g.vendor_id ? (getVendorById(g.vendor_id) ?? null) : null;
+	return { ...g, person, occasion, vendor };
 }
 
 export function createGift(input: GiftCreateInput, actorUserId: number): Gift {
 	const db = getDb();
 	const status = input.status ?? 'planned';
 	const is_idea = input.is_idea ? 1 : 0;
+
+	// Denormalize vendor name into source for display continuity while the
+	// legacy source column is still present. Explicit input.source still wins
+	// (e.g. an admin reassigning to a vendor that doesn't yet exist).
+	let source = input.source ?? null;
+	const vendor_id = input.vendor_id ?? null;
+	if (vendor_id != null && source == null) {
+		source = getVendorById(vendor_id)?.name ?? null;
+	}
+
 	const info = db
 		.prepare(
 			`INSERT INTO gifts (
 			   person_id, occasion_id, occasion_year, title, source, source_url,
-			   order_id, tracking_number, carrier, price_cents, status, notes, is_idea
-			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			   order_id, tracking_number, carrier, price_cents, status, notes, is_idea, vendor_id
+			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.run(
 			input.person_id,
 			input.occasion_id ?? null,
 			input.occasion_year ?? null,
 			input.title,
-			input.source ?? null,
+			source,
 			input.source_url ?? null,
 			input.order_id ?? null,
 			input.tracking_number ?? null,
@@ -111,7 +127,8 @@ export function createGift(input: GiftCreateInput, actorUserId: number): Gift {
 			input.price_cents ?? null,
 			status,
 			input.notes ?? null,
-			is_idea
+			is_idea,
+			vendor_id
 		);
 	const id = Number(info.lastInsertRowid);
 	const gift = getGiftById(id)!;
@@ -141,7 +158,8 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 		'tracking_number',
 		'carrier',
 		'price_cents',
-		'notes'
+		'notes',
+		'vendor_id'
 	];
 	const changed: string[] = [];
 	for (const col of columns) {
@@ -149,6 +167,19 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 			const next = input[col] ?? null;
 			if (merged[col] !== next) changed.push(col);
 			(merged as unknown as Record<string, unknown>)[col] = next;
+		}
+	}
+
+	// Keep the legacy source column in lockstep with the new vendor_id when
+	// vendor_id changed and the caller didn't override source explicitly.
+	if (
+		'vendor_id' in input &&
+		!('source' in input)
+	) {
+		const newSource = merged.vendor_id ? (getVendorById(merged.vendor_id)?.name ?? null) : null;
+		if (merged.source !== newSource) {
+			merged.source = newSource;
+			if (!changed.includes('source')) changed.push('source');
 		}
 	}
 
@@ -169,7 +200,7 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 	db.prepare(
 		`UPDATE gifts SET
 		    person_id = ?, title = ?, source = ?, source_url = ?, occasion_id = ?, occasion_year = ?,
-		    order_id = ?, tracking_number = ?, carrier = ?, price_cents = ?, notes = ?,
+		    order_id = ?, tracking_number = ?, carrier = ?, price_cents = ?, notes = ?, vendor_id = ?,
 		    updated_at = CURRENT_TIMESTAMP
 		  WHERE id = ?`
 	).run(
@@ -184,6 +215,7 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 		merged.carrier,
 		merged.price_cents,
 		merged.notes,
+		merged.vendor_id,
 		id
 	);
 	const after = getGiftById(id)!;

@@ -122,8 +122,12 @@
 				· {data.gift.occasion.title}{#if data.gift.occasion_year} {data.gift.occasion_year}{/if}
 			{/if}
 		</p>
-		{#if data.gift.source}
-			<p class="sub">From {data.gift.source}{#if data.gift.price_cents} · {priceDollars(data.gift.price_cents)}{/if}</p>
+		{#if data.gift.vendor || data.gift.source}
+			<p class="sub">
+				From {data.gift.vendor?.name ?? data.gift.source}{#if data.gift.price_cents}
+					· {priceDollars(data.gift.price_cents)}
+				{/if}
+			</p>
 		{:else if data.gift.price_cents}
 			<p class="sub">{priceDollars(data.gift.price_cents)}</p>
 		{/if}

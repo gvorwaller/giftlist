@@ -20,7 +20,7 @@
 		return {
 			person_id: String(data.prefill.person_id ?? ''),
 			title: data.prefill.title ?? '',
-			source: data.prefill.source ?? '',
+			vendor_id: String(data.prefill.vendor_id ?? ''),
 			source_url: data.prefill.source_url ?? '',
 			occasion_id: String(data.prefill.occasion_id ?? ''),
 			occasion_year: String(data.prefill.occasion_year ?? data.currentYear),
@@ -37,7 +37,7 @@
 
 	let personId = $state(initial.person_id);
 	let title = $state(initial.title);
-	let source = $state(initial.source);
+	let vendorId = $state(initial.vendor_id);
 	let occasionId = $state(initial.occasion_id);
 	let occasionYear = $state(initial.occasion_year);
 	let orderId = $state(initial.order_id);
@@ -74,7 +74,7 @@
 		return {
 			person_id: personId ? Number(personId) : null,
 			title,
-			source,
+			vendor_id: vendorId ? Number(vendorId) : null,
 			occasion_id: occasionId ? Number(occasionId) : null,
 			occasion_year: occasionYear ? Number(occasionYear) : null,
 			order_id: orderId,
@@ -90,7 +90,7 @@
 		return Boolean(
 			(s.person_id && s.person_id > 0) ||
 				s.title?.trim() ||
-				s.source?.trim() ||
+				(s.vendor_id && s.vendor_id > 0) ||
 				s.occasion_id ||
 				s.order_id?.trim() ||
 				s.tracking_number?.trim() ||
@@ -238,14 +238,15 @@
 
 		<label class="big">
 			<span>Where from?</span>
-			<input
-				name="source"
-				type="text"
-				autocomplete="off"
-				bind:value={source}
-				oninput={onInput}
-				placeholder="Amazon, Etsy, a local shop…"
-			/>
+			<select name="vendor_id" bind:value={vendorId} oninput={onInput}>
+				<option value="">— pick a vendor —</option>
+				{#each data.vendors as v (v.id)}
+					<option value={String(v.id)}>{v.name}</option>
+				{/each}
+			</select>
+			{#if data.vendors.length === 0}
+				<span class="hint">No vendors yet — admin can add one in Admin → Vendors.</span>
+			{/if}
 		</label>
 
 		<label class="checkbox">
@@ -514,6 +515,13 @@
 	.error {
 		color: var(--rose);
 		font-size: 15px;
+	}
+
+	label .hint {
+		font-family: var(--font-sans);
+		font-size: 13px;
+		font-weight: 400;
+		color: var(--muted);
 	}
 
 	.actions {

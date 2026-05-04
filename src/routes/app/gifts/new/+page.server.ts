@@ -4,12 +4,13 @@ import { listPeople, getPersonById } from '$server/people';
 import { listPersonOccasions, nextOccurrenceDate } from '$server/occasions';
 import { createGift, parseDollarsToCents } from '$server/gifts';
 import { deleteDraft, getFreshDraft, parseDraftPayload } from '$server/drafts';
+import { listVendors, getVendorById } from '$server/vendors';
 import type { OccasionWithLink } from '$server/occasions';
 
 export interface GiftDraftPayload {
 	person_id?: number | null;
 	title?: string;
-	source?: string;
+	vendor_id?: number | null;
 	source_url?: string;
 	occasion_id?: number | null;
 	occasion_year?: number | null;
@@ -72,6 +73,7 @@ export const load: PageServerLoad = ({ locals, url }) => {
 	return {
 		people,
 		personOccasions,
+		vendors: listVendors({ includeArchived: false }),
 		prefill,
 		draftUpdatedAt,
 		currentYear: new Date().getFullYear()
@@ -116,12 +118,19 @@ export const actions: Actions = {
 			return fail(400, { error: 'Price should look like 24.99', values: formValues(fd) });
 		}
 
+		const vendor_id_raw = numOrNull(trim(fd.get('vendor_id')));
+		// vendor_id is optional but, if supplied, must point to an extant row.
+		// Anything else suggests a stale form / tampered POST — reject loudly.
+		if (vendor_id_raw != null && !getVendorById(vendor_id_raw)) {
+			return fail(400, { error: 'Pick a vendor from the list.', values: formValues(fd) });
+		}
+
 		const status = fd.get('status') === 'idea' ? 'idea' : 'planned';
 		const gift = createGift(
 			{
 				person_id,
 				title,
-				source: nullable(trim(fd.get('source'))),
+				vendor_id: vendor_id_raw,
 				source_url: nullable(trim(fd.get('source_url'))),
 				occasion_id: numOrNull(trim(fd.get('occasion_id'))),
 				occasion_year: numOrNull(trim(fd.get('occasion_year'))),
@@ -151,7 +160,7 @@ function formValues(fd: FormData): Record<string, string> {
 	for (const key of [
 		'person_id',
 		'title',
-		'source',
+		'vendor_id',
 		'source_url',
 		'occasion_id',
 		'occasion_year',

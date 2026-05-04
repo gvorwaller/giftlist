@@ -10,6 +10,7 @@ import { parseAmazonEmail } from '../amazon-parser';
 import { matchRecipient, saveAlias } from '../name-matcher';
 import { logAudit } from '../audit';
 import { createGift, getGiftById, updateGift } from '../gifts';
+import { ensureVendor } from '../vendors';
 import { transitionGift, canTransition } from './../gift-status';
 import type {
 	EmailType,
@@ -431,11 +432,14 @@ function resolveOrCreateGift(row: ImportRow, personId: number, userId: number): 
 			.get(row.parsed_order_id);
 		if (hit) return hit.id;
 	}
+	// Auto-create the Amazon vendor on first import so admins don't have to
+	// pre-seed it. Subsequent imports just look it up.
+	const amazonVendor = ensureVendor('Amazon', userId);
 	const gift = createGift(
 		{
 			person_id: personId,
 			title: row.parsed_title ?? row.subject ?? '(imported)',
-			source: 'Amazon',
+			vendor_id: amazonVendor.id,
 			occasion_id: null,
 			occasion_year: new Date().getFullYear(),
 			order_id: row.parsed_order_id,
