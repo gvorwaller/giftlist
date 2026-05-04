@@ -39,7 +39,12 @@
 	<header class="page-header">
 		<p class="eyebrow">Admin</p>
 		<h1>Home</h1>
-		<p class="subtitle">Control center for the household. Manager view is <a href="/app/today">over here</a>.</p>
+		<div class="subtitle">
+			<span>Control center for the household.</span>
+			<form method="POST" action="/api/preview/start">
+				<button type="submit" class="link-btn">Preview manager view</button>
+			</form>
+		</div>
 	</header>
 
 	{#if data.home.priorityAction}
@@ -248,9 +253,34 @@
 
 	.subtitle {
 		margin-top: 8px;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 6px;
 		font-family: var(--font-sans);
 		font-size: 16px;
 		color: var(--muted);
+	}
+
+	.subtitle form {
+		display: inline;
+		margin: 0;
+	}
+
+	.link-btn {
+		background: none;
+		border: none;
+		padding: 0;
+		font: inherit;
+		color: var(--green);
+		text-decoration: underline;
+		cursor: pointer;
+	}
+
+	.link-btn:hover,
+	.link-btn:focus-visible {
+		text-decoration: none;
+		outline: none;
 	}
 
 	.card {

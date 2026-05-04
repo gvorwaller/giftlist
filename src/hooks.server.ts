@@ -49,7 +49,22 @@ export const handle: Handle = async ({ event, resolve }) => {
 		event.locals.user = null;
 	}
 
+	// Preview-as-manager: only meaningful when the authenticated user is admin.
+	event.locals.previewAsManager =
+		event.locals.user?.role === 'admin' &&
+		event.cookies.get(PREVIEW_COOKIE_NAME) === 'manager';
+
 	return resolve(event);
+};
+
+export const PREVIEW_COOKIE_NAME = 'giftlist_preview';
+
+export const PREVIEW_COOKIE_OPTS = {
+	path: '/',
+	httpOnly: true,
+	sameSite: 'lax' as const,
+	secure: !dev,
+	maxAge: 60 * 60 * 8 // 8 hours — preview is intentionally short-lived
 };
 
 // Used by login/logout to set/clear the cookie with consistent attributes.

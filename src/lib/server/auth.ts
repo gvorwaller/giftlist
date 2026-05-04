@@ -33,6 +33,22 @@ export function findUserByUsername(username: string): User | undefined {
 		.get(username);
 }
 
+export function findManagerUser(): User | null {
+	const db = getDb();
+	return (
+		db
+			.prepare<[], User>(
+				`SELECT id, username, password_hash, role, display_name,
+				        last_login_at, last_seen_path, last_seen_at, created_at
+				   FROM users
+				  WHERE role = 'manager'
+				  ORDER BY id ASC
+				  LIMIT 1`
+			)
+			.get() ?? null
+	);
+}
+
 export function recordLogin(userId: number): void {
 	const db = getDb();
 	db.prepare('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?').run(userId);

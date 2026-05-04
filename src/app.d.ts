@@ -5,6 +5,7 @@ declare global {
 		// interface Error {}
 		interface Locals {
 			user: User | null;
+			previewAsManager: boolean;
 		}
 		// interface PageData {}
 		// interface PageState {}
