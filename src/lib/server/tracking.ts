@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import { getDb } from './db';
 import { getGiftById, updateGift } from './gifts';
 import { getShipperById } from './shippers';
@@ -279,36 +279,25 @@ export async function pullAllInFlight(actorUserId: number): Promise<{
 }
 
 /**
- * Verify a Shippo webhook signature. Header format:
- *   shippo-auth-signature: t=<timestamp>,v1=<sha256_hex>
- * Signed payload: `${timestamp}.${rawBody}`. Constant-time comparison.
+ * Verify a Shippo webhook by comparing the `?token=` query param against the
+ * configured shared secret. Shippo offers three webhook security models — IP
+ * allowlist, self-generated URL tokens, and HMAC — but HMAC requires emailing
+ * an account manager and waiting up to 10 business days. URL tokens are
+ * self-service and adequate for a single-tenant app: keep the URL secret and
+ * the token effectively functions as a bearer credential.
  *
  * Rejects if SHIPPO_WEBHOOK_SECRET is not configured — better to fail closed
- * than silently accept unsigned input on a public endpoint.
+ * than silently accept unauthenticated input on a public endpoint.
+ *
+ * Secret rotation: regenerate `SHIPPO_WEBHOOK_SECRET`, edit the webhook URL
+ * in the Shippo dashboard, restart pm2.
  */
-export function verifyWebhookSignature(
-	rawBody: string,
-	signatureHeader: string | null
-): boolean {
+export function verifyWebhookToken(urlToken: string | null): boolean {
 	const cfg = readConfig();
 	if (!cfg || !cfg.webhookSecret) return false;
-	if (!signatureHeader) return false;
-
-	const parts = signatureHeader.split(',').map((p) => p.trim());
-	let timestamp: string | null = null;
-	let signature: string | null = null;
-	for (const p of parts) {
-		const [k, v] = p.split('=', 2);
-		if (k === 't') timestamp = v;
-		if (k === 'v1') signature = v;
-	}
-	if (!timestamp || !signature) return false;
-
-	const signed = `${timestamp}.${rawBody}`;
-	const expected = createHmac('sha256', cfg.webhookSecret).update(signed).digest('hex');
-	if (expected.length !== signature.length) return false;
-	const expectedBuf = Buffer.from(expected, 'utf8');
-	const receivedBuf = Buffer.from(signature, 'utf8');
+	if (!urlToken) return false;
+	const expectedBuf = Buffer.from(cfg.webhookSecret, 'utf8');
+	const receivedBuf = Buffer.from(urlToken, 'utf8');
 	if (expectedBuf.length !== receivedBuf.length) return false;
 	return timingSafeEqual(expectedBuf, receivedBuf);
 }

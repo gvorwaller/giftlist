@@ -4,7 +4,7 @@ import {
 	applyStatusUpdate,
 	findGiftByCarrierAndNumber,
 	findGiftByProviderId,
-	verifyWebhookSignature,
+	verifyWebhookToken,
 	type ShippoTrack
 } from '$server/tracking';
 import { getDb } from '$server/db';
@@ -13,21 +13,22 @@ import { getDb } from '$server/db';
  * Shippo webhook receiver. Shippo POSTs status changes here as soon as the
  * carrier reports a new checkpoint — much faster than our daily poll.
  *
- * Security: HMAC-SHA256 over `${timestamp}.${rawBody}` using
- * SHIPPO_WEBHOOK_SECRET. The signature is sent in the
- * `shippo-auth-signature` header as `t=<timestamp>,v1=<sha256_hex>`. Without
- * SHIPPO_WEBHOOK_SECRET configured we reject every request with 401 — better
- * than silently accepting unsigned input on a public endpoint.
+ * Security: shared-secret URL token. The webhook URL configured in the Shippo
+ * dashboard ends with `?token=<SHIPPO_WEBHOOK_SECRET>`; we compare that param
+ * to the env var with a timing-safe equality check. Without
+ * SHIPPO_WEBHOOK_SECRET configured we reject every request with 401. (HMAC
+ * signing is also offered by Shippo but only via account-manager request; URL
+ * tokens are self-service and sufficient at our single-tenant scale.)
  *
  * The actor for any audit log entries is the admin user (singular) since this
  * is an unauthenticated machine-to-machine call.
  */
-export const POST: RequestHandler = async ({ request }) => {
-	const rawBody = await request.text();
-	const sig = request.headers.get('shippo-auth-signature');
-	if (!verifyWebhookSignature(rawBody, sig)) {
-		return json({ error: 'Bad signature' }, { status: 401 });
+export const POST: RequestHandler = async ({ request, url }) => {
+	const token = url.searchParams.get('token');
+	if (!verifyWebhookToken(token)) {
+		return json({ error: 'Bad token' }, { status: 401 });
 	}
+	const rawBody = await request.text();
 
 	let payload: { event?: string; data?: ShippoTrack } | ShippoTrack;
 	try {
