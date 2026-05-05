@@ -140,7 +140,10 @@ export const actions: Actions = {
 			return fail(400, { error: 'Pick a shipper from the list.', values: formValues(fd) });
 		}
 
-		const status = fd.get('status') === 'idea' ? 'idea' : 'planned';
+		// `ordered` is the default for self-orders (personal packages already on
+		// the way). For gift-flow it's "idea" or "planned" (default).
+		const rawStatus = fd.get('status');
+		const status = rawStatus === 'idea' ? 'idea' : rawStatus === 'ordered' ? 'ordered' : 'planned';
 		const gift = createGift(
 			{
 				person_id,

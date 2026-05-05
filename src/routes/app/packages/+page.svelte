@@ -34,24 +34,30 @@
 		<p class="subtitle">
 			Bought, not yet delivered. Tap a row for status, or the pencil to edit.
 		</p>
-		{#if data.trackingProviderConfigured && data.inFlight.length > 0}
-			<form method="POST" action="?/refreshAll" class="refresh-row">
-				<button type="submit" class="ghost small">Refresh all tracking</button>
-				{#if form?.ok}
-					<span class="refresh-result" role="status">
-						Checked {form.checked}, updated {form.updated}{#if form.failed > 0}, {form.failed}
-							failed{/if}.
-					</span>
-				{:else if form?.trackingError}
-					<span class="refresh-err" role="alert">{form.trackingError}</span>
-				{/if}
-			</form>
+		<div class="actions-row">
+			<a href="/app/gifts/new" class="primary small">Add a package</a>
+			{#if data.trackingProviderConfigured && data.inFlight.length > 0}
+				<form method="POST" action="?/refreshAll" class="refresh-row">
+					<button type="submit" class="ghost small">Refresh all tracking</button>
+				</form>
+			{/if}
+		</div>
+		{#if form?.ok}
+			<p class="refresh-result" role="status">
+				Checked {form.checked}, updated {form.updated}{#if form.failed > 0}, {form.failed}
+					failed{/if}.
+			</p>
+		{:else if form?.trackingError}
+			<p class="refresh-err" role="alert">{form.trackingError}</p>
 		{/if}
 	</header>
 
 	{#if data.inFlight.length === 0}
 		<section class="card empty">
 			<p>Nothing on its way right now.</p>
+			<p class="empty-hint">
+				Tap <strong>Add a package</strong> above to track a personal order or gift.
+			</p>
 		</section>
 	{:else}
 		<ul class="list">
@@ -143,7 +149,12 @@
 		font-size: 17px;
 		color: var(--muted);
 		text-align: center;
-		padding: 20px 0;
+		padding: 12px 0 4px;
+	}
+
+	.empty-hint {
+		padding: 0 0 16px !important;
+		font-size: 14px !important;
 	}
 
 	.list {
@@ -211,12 +222,33 @@
 		color: var(--green);
 	}
 
-	.refresh-row {
-		margin-top: 12px;
+	.actions-row {
+		margin-top: 14px;
 		display: flex;
 		gap: 10px;
 		align-items: center;
 		flex-wrap: wrap;
+	}
+
+	.refresh-row {
+		display: contents;
+	}
+
+	.primary.small {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 36px;
+		padding: 6px 14px;
+		font-size: 13px;
+		background: var(--green);
+		color: var(--paper);
+		border: 1px solid var(--green);
+		border-radius: var(--radius-control);
+		font-family: var(--font-sans);
+		font-weight: 600;
+		text-decoration: none;
+		cursor: pointer;
 	}
 
 	.ghost.small {

@@ -56,11 +56,35 @@
 		)
 	);
 
+	// Auto-open "More details" once when a self-person is picked, so tracking
+	// number / shipper are visible without extra taps. Tracks the prior value
+	// so we don't keep forcing it open after the user manually closes it.
+	let lastSelfState = $state(false);
+	$effect(() => {
+		const id = Number(personId);
+		const found = id ? data.people.find((p) => p.id === id) : null;
+		const isSelfNow = found?.is_self === 1;
+		if (isSelfNow && !lastSelfState) {
+			moreDetailsOpen = true;
+		}
+		lastSelfState = isSelfNow;
+	});
+
 	// If the user switches person mid-form, the server-supplied occasion list
 	// for the initial person no longer applies. Clear until next page load.
 	const personOccasions = $derived.by(() => {
 		if (!personId || personId !== initialPrefillPersonId) return [];
 		return data.personOccasions;
+	});
+
+	// When the picked person is_self, this is a personal package — default
+	// status to "ordered" so it lands on /app/packages immediately, and hide
+	// the gift-flavored "Just an idea" checkbox + occasion field.
+	const selectedIsSelf = $derived.by(() => {
+		const id = Number(personId);
+		if (!id) return false;
+		const found = data.people.find((p) => p.id === id);
+		return found?.is_self === 1;
 	});
 
 	let savingState: 'idle' | 'saving' | 'saved' | 'error' = $state('idle');
@@ -252,29 +276,38 @@
 			{/if}
 		</label>
 
-		<label class="checkbox">
-			<input
-				type="checkbox"
-				bind:checked={isIdea}
-				oninput={onInput}
-				name="__is_idea_ui_only"
-			/>
-			<span>Just an idea for now</span>
-			<input type="hidden" name="status" value={isIdea ? 'idea' : 'planned'} />
-		</label>
+		{#if selectedIsSelf}
+			<p class="self-note" role="status">
+				Personal package — saves as "ordered" so it shows on Packages.
+			</p>
+			<input type="hidden" name="status" value="ordered" />
+		{:else}
+			<label class="checkbox">
+				<input
+					type="checkbox"
+					bind:checked={isIdea}
+					oninput={onInput}
+					name="__is_idea_ui_only"
+				/>
+				<span>Just an idea for now</span>
+				<input type="hidden" name="status" value={isIdea ? 'idea' : 'planned'} />
+			</label>
+		{/if}
 
 		<details bind:open={moreDetailsOpen} class="more">
 			<summary>More details</summary>
 
-			<label>
-				<span>Occasion</span>
-				<select name="occasion_id" bind:value={occasionId} oninput={onInput}>
-					<option value="">None</option>
-					{#each personOccasions as o (o.personOccasionId)}
-						<option value={String(o.id)}>{o.title}</option>
-					{/each}
-				</select>
-			</label>
+			{#if !selectedIsSelf}
+				<label>
+					<span>Occasion</span>
+					<select name="occasion_id" bind:value={occasionId} oninput={onInput}>
+						<option value="">None</option>
+						{#each personOccasions as o (o.personOccasionId)}
+							<option value={String(o.id)}>{o.title}</option>
+						{/each}
+					</select>
+				</label>
+			{/if}
 
 			<div class="row">
 				<label>
@@ -517,6 +550,16 @@
 	.error {
 		color: var(--rose);
 		font-size: 15px;
+	}
+
+	.self-note {
+		font-family: var(--font-sans);
+		font-size: 14px;
+		color: var(--amber);
+		background: var(--amber-soft);
+		border: 1px solid var(--amber);
+		border-radius: var(--radius-control);
+		padding: 10px 14px;
 	}
 
 	label .hint {
