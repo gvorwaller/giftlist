@@ -41,7 +41,9 @@ function numOrNull(v: string): number | null {
 export const load: PageServerLoad = ({ locals, url }) => {
 	if (!locals.user) throw redirect(303, '/login');
 
-	const people = listPeople({ includeArchived: false, sort: 'alphabetical' });
+	// Include self-people in the dropdown so personal orders can be entered
+	// here too (see td-24eac3). The .svelte side flags them with " (me)".
+	const people = listPeople({ includeArchived: false, includeSelf: true, sort: 'alphabetical' });
 	const preselectedPersonId = url.searchParams.get('person');
 	let prefill: GiftDraftPayload = {};
 	let draftUpdatedAt: string | null = null;
@@ -59,12 +61,17 @@ export const load: PageServerLoad = ({ locals, url }) => {
 	}
 
 	const activePersonId = prefill.person_id ?? null;
-	const personOccasions = activePersonId ? listPersonOccasions(activePersonId) : [];
+	const activePerson = activePersonId ? getPersonById(activePersonId) : null;
+	// Self-people don't track occasions (no birthday/holiday context for
+	// "I bought myself a charger"), so skip the per-person occasion list and
+	// the auto-pick of nearest occurrence when the active person is_self.
+	const personOccasions =
+		activePersonId && activePerson?.is_self !== 1 ? listPersonOccasions(activePersonId) : [];
 
 	// When the form opens for a specific person and no occasion was selected in
 	// the draft, default to that person's next upcoming occasion so the Today
 	// screen's "Next Best Action" can later recognize this gift as handling it.
-	if (activePersonId && !prefill.occasion_id && personOccasions.length > 0) {
+	if (activePerson?.is_self !== 1 && activePersonId && !prefill.occasion_id && personOccasions.length > 0) {
 		const nearest = pickNearestOccurrence(personOccasions);
 		if (nearest) {
 			prefill.occasion_id = nearest.id;

@@ -78,6 +78,7 @@ function countIncompletePeople(): number {
 		.prepare<[], { cnt: number }>(
 			`SELECT COUNT(*) AS cnt FROM people p
 			  WHERE p.is_archived = 0
+			    AND p.is_self = 0
 			    AND NOT EXISTS (
 			      SELECT 1 FROM person_occasions po WHERE po.person_id = p.id AND po.is_active = 1
 			    )`
@@ -92,6 +93,7 @@ function listIncompletePeople(limit = 8): Person[] {
 		.prepare<[number], Person>(
 			`SELECT p.* FROM people p
 			  WHERE p.is_archived = 0
+			    AND p.is_self = 0
 			    AND NOT EXISTS (
 			      SELECT 1 FROM person_occasions po WHERE po.person_id = p.id AND po.is_active = 1
 			    )

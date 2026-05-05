@@ -82,7 +82,9 @@
 			<span>Who is it for?</span>
 			<select name="person_id" bind:value={personId} required oninput={handlePersonChange}>
 				{#each data.people as p (p.id)}
-					<option value={String(p.id)}>{p.display_name}</option>
+					<option value={String(p.id)}>
+						{p.display_name}{p.is_self ? ' (me)' : ''}
+					</option>
 				{/each}
 			</select>
 		</label>

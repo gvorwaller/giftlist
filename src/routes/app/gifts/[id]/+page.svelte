@@ -95,8 +95,12 @@
 <main class="gift-detail">
 	<header class="page-header">
 		<p class="crumbs">
-			<a href="/app/people/{data.gift.person.id}">{data.gift.person.display_name}</a> /
-			<span>Gift</span>
+			{#if data.gift.person.is_self}
+				<span>{data.gift.person.display_name} (me)</span>
+			{:else}
+				<a href="/app/people/{data.gift.person.id}">{data.gift.person.display_name}</a>
+			{/if}
+			/ <span>Gift</span>
 		</p>
 		<div class="title-row">
 			<h1>{data.gift.title}</h1>
@@ -130,7 +134,11 @@
 	<section class="card hero">
 		<p class="eyebrow">For</p>
 		<p class="hero-body">
-			<a href="/app/people/{data.gift.person.id}">{data.gift.person.display_name}</a>
+			{#if data.gift.person.is_self}
+				{data.gift.person.display_name} (me)
+			{:else}
+				<a href="/app/people/{data.gift.person.id}">{data.gift.person.display_name}</a>
+			{/if}
 			{#if data.gift.occasion}
 				· {data.gift.occasion.title}{#if data.gift.occasion_year} {data.gift.occasion_year}{/if}
 			{/if}

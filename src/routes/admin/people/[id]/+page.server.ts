@@ -47,6 +47,7 @@ export const actions: Actions = {
 		if (!display_name) {
 			return fail(400, { scope: 'update', error: 'Display name is required.' });
 		}
+		const is_self = fd.get('is_self') === 'on' || fd.get('is_self') === '1';
 		updatePerson(
 			id,
 			{
@@ -54,7 +55,8 @@ export const actions: Actions = {
 				full_name: nullable(fd, 'full_name'),
 				relationship: nullable(fd, 'relationship'),
 				default_shipping_address: nullable(fd, 'default_shipping_address'),
-				notes: nullable(fd, 'notes')
+				notes: nullable(fd, 'notes'),
+				is_self
 			},
 			locals.user.id
 		);

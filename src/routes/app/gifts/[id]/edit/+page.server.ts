@@ -48,10 +48,21 @@ export const load: PageServerLoad = ({ params, locals }) => {
 			? [...activeShippers, currentShipper]
 			: activeShippers;
 
+	// Include self-people so editing a self-order keeps its current person_id
+	// in the <select> options. The gift form supports self-people end-to-end
+	// (no occasion auto-pick, "(me)" suffix in the UI).
+	const peopleList = listPeople({
+		includeArchived: false,
+		includeSelf: true,
+		sort: 'alphabetical'
+	});
+
 	return {
 		gift,
-		people: listPeople({ includeArchived: false, sort: 'alphabetical' }),
-		personOccasions: listPersonOccasions(gift.person_id),
+		people: peopleList,
+		// Self-people don't carry occasion context; surface an empty list so
+		// the occasion dropdown is just "None" for self-orders.
+		personOccasions: gift.person.is_self === 1 ? [] : listPersonOccasions(gift.person_id),
 		vendors,
 		shippers,
 		priceInitial: priceDollarsInput(gift.price_cents)

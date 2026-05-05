@@ -8,7 +8,7 @@ export const load: PageServerLoad = ({ url }) => {
 	const includeArchived = url.searchParams.get('archived') === '1';
 	const sortParam = url.searchParams.get('sort');
 	const sort: 'upcoming' | 'alphabetical' = sortParam === 'alphabetical' ? 'alphabetical' : 'upcoming';
-	const people = listPeople({ search, includeArchived, sort });
+	const people = listPeople({ search, includeArchived, includeSelf: true, sort });
 	const sharedOccasions = listSharedOccasions();
 	return { people, search, includeArchived, sort, sharedOccasions };
 };

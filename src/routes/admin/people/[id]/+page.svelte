@@ -78,6 +78,14 @@
 				<textarea name="notes" rows="3">{data.person.notes ?? ''}</textarea>
 			</label>
 
+			<label class="checkbox">
+				<input type="checkbox" name="is_self" checked={data.person.is_self === 1} />
+				<span class="checkbox-label">
+					This is me (personal package tracking)
+					<small>Self-people are hidden from /app/today, /app/people, and reminder digests. Their orders still appear on /app/packages.</small>
+				</span>
+			</label>
+
 			{#if form?.scope === 'update' && form.error}
 				<p class="error" role="alert">{form.error}</p>
 			{/if}
@@ -539,5 +547,32 @@
 		flex-direction: row;
 		gap: 10px;
 		justify-content: flex-end;
+	}
+
+	.checkbox {
+		flex-direction: row;
+		align-items: flex-start;
+		gap: 12px;
+	}
+
+	.checkbox input[type='checkbox'] {
+		width: 22px;
+		height: 22px;
+		min-height: 22px;
+		margin-top: 2px;
+		accent-color: var(--green);
+	}
+
+	.checkbox-label {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.checkbox-label small {
+		font-family: var(--font-sans);
+		font-size: 13px;
+		color: var(--muted);
+		font-weight: 400;
 	}
 </style>

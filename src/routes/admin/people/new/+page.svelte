@@ -13,6 +13,7 @@
 		relationship?: string;
 		default_shipping_address?: string;
 		notes?: string;
+		is_self?: boolean;
 	}
 
 	const values = $derived<Values>(form?.values ?? {});
@@ -70,6 +71,14 @@
 				name="notes"
 				rows="3"
 				placeholder="Preferences, sizes, avoidances…">{values.notes ?? ''}</textarea>
+		</label>
+
+		<label class="checkbox">
+			<input type="checkbox" name="is_self" checked={values.is_self ?? false} />
+			<span class="checkbox-label">
+				This is me (personal package tracking)
+				<small>Self-people are hidden from /app/today, /app/people, and reminder digests. Their orders still appear on /app/packages.</small>
+			</span>
 		</label>
 
 		{#if form?.error}
@@ -172,6 +181,30 @@
 		font-family: var(--font-sans);
 		font-size: 13px;
 		color: var(--muted);
+	}
+
+	.checkbox {
+		flex-direction: row;
+		align-items: flex-start;
+		gap: 12px;
+	}
+
+	.checkbox input[type='checkbox'] {
+		width: 22px;
+		height: 22px;
+		min-height: 22px;
+		margin-top: 2px;
+		accent-color: var(--green);
+	}
+
+	.checkbox-label {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.checkbox-label small {
+		font-weight: 400;
 	}
 
 	.error {

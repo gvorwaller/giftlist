@@ -1,6 +1,5 @@
 import { getDb } from './db';
 import { nextOccurrenceDate } from './occasions';
-import { listRecent } from './recently-viewed';
 import { getFreshDraft } from './drafts';
 import type {
 	Draft,
@@ -49,7 +48,7 @@ function loadUpcomingWindow(daysAhead: number): UpcomingOccasion[] {
 			        o.month, o.day, o.date, o.reminder_days, o.year,
 			        o.created_at, o.updated_at
 			   FROM person_occasions po
-			   JOIN people p ON p.id = po.person_id AND p.is_archived = 0
+			   JOIN people p ON p.id = po.person_id AND p.is_archived = 0 AND p.is_self = 0
 			   JOIN occasions o ON o.id = po.occasion_id
 			  WHERE po.is_active = 1`
 		)
@@ -132,18 +131,41 @@ export function loadTodayData(userId: number): TodayData {
 	const db = getDb();
 	const packagesOnTheWay = db
 		.prepare<[], Gift>(
-			`SELECT * FROM gifts
-			  WHERE is_archived = 0 AND status IN ('ordered', 'shipped')
-			  ORDER BY COALESCE(shipped_at, ordered_at, created_at) DESC
+			`SELECT g.* FROM gifts g
+			   JOIN people p ON p.id = g.person_id
+			  WHERE g.is_archived = 0
+			    AND g.status IN ('ordered', 'shipped')
+			    AND p.is_self = 0
+			  ORDER BY COALESCE(g.shipped_at, g.ordered_at, g.created_at) DESC
 			  LIMIT 5`
 		)
 		.all();
+
+	// Filter recently_viewed so self-people (and gifts whose person is_self)
+	// don't leak back into the manager Today screen even if a self-person row
+	// exists in the user's recent-history table from before is_self was set.
+	const recentlyViewed = db
+		.prepare<[number, number], RecentlyViewed>(
+			`SELECT rv.* FROM recently_viewed rv
+			  WHERE rv.user_id = ?
+			    AND NOT (rv.entity_type = 'person' AND EXISTS (
+			      SELECT 1 FROM people p WHERE p.id = rv.entity_id AND p.is_self = 1
+			    ))
+			    AND NOT (rv.entity_type = 'gift' AND EXISTS (
+			      SELECT 1 FROM gifts g
+			        JOIN people p ON p.id = g.person_id
+			       WHERE g.id = rv.entity_id AND p.is_self = 1
+			    ))
+			  ORDER BY rv.viewed_at DESC
+			  LIMIT ?`
+		)
+		.all(userId, 3);
 
 	return {
 		nextBestAction,
 		comingUp,
 		packagesOnTheWay,
-		recentlyViewed: listRecent(userId, 3),
+		recentlyViewed,
 		resumeDraft: getFreshDraft(userId, 'gift') ?? null
 	};
 }

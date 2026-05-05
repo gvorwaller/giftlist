@@ -17,6 +17,7 @@ export const actions: Actions = {
 		if (!locals.user) throw redirect(303, '/login');
 		const fd = await request.formData();
 		const display_name = str(fd, 'display_name');
+		const is_self = fd.get('is_self') === 'on' || fd.get('is_self') === '1';
 		if (!display_name) {
 			return fail(400, {
 				error: 'A display name is required.',
@@ -25,7 +26,8 @@ export const actions: Actions = {
 					full_name: str(fd, 'full_name'),
 					relationship: str(fd, 'relationship'),
 					default_shipping_address: str(fd, 'default_shipping_address'),
-					notes: str(fd, 'notes')
+					notes: str(fd, 'notes'),
+					is_self
 				}
 			});
 		}
@@ -36,7 +38,8 @@ export const actions: Actions = {
 				full_name: nullable(fd, 'full_name'),
 				relationship: nullable(fd, 'relationship'),
 				default_shipping_address: nullable(fd, 'default_shipping_address'),
-				notes: nullable(fd, 'notes')
+				notes: nullable(fd, 'notes'),
+				is_self
 			},
 			locals.user.id
 		);

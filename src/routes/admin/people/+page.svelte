@@ -113,35 +113,43 @@
 							/>
 						</label>
 					{/if}
-					<a class="row" class:archived={person.is_archived === 1} href="/admin/people/{person.id}">
+					<a class="row" class:archived={person.is_archived === 1} class:self={person.is_self === 1} href="/admin/people/{person.id}">
 						<div class="row-main">
-							<p class="name">{person.display_name}</p>
+							<p class="name">
+								{person.display_name}{#if person.is_self} <span class="self-tag">(me)</span>{/if}
+							</p>
 							<p class="meta">
-								{#if person.relationship}
-									{person.relationship}
-								{/if}
-								{#if person.relationship && person.nextOccasion}
-									<span class="dot"> · </span>
-								{/if}
-								{#if person.nextOccasion}
-									{#if person.nextOccasion.kind === 'birthday' && person.nextOccasion.turnsAge !== null}
-										<span class="occ"
-											>Turns {person.nextOccasion.turnsAge} in {person.nextOccasion
-												.daysUntil} day{person.nextOccasion.daysUntil === 1 ? '' : 's'}</span
-										>
-									{:else}
-										<span class="occ"
-											>{person.nextOccasion.title} in {person.nextOccasion.daysUntil} day{person
-												.nextOccasion.daysUntil === 1
-												? ''
-												: 's'}</span
-										>
+								{#if person.is_self}
+									<span class="self-meta">Personal orders — hidden from manager views</span>
+								{:else}
+									{#if person.relationship}
+										{person.relationship}
+									{/if}
+									{#if person.relationship && person.nextOccasion}
+										<span class="dot"> · </span>
+									{/if}
+									{#if person.nextOccasion}
+										{#if person.nextOccasion.kind === 'birthday' && person.nextOccasion.turnsAge !== null}
+											<span class="occ"
+												>Turns {person.nextOccasion.turnsAge} in {person.nextOccasion
+													.daysUntil} day{person.nextOccasion.daysUntil === 1 ? '' : 's'}</span
+											>
+										{:else}
+											<span class="occ"
+												>{person.nextOccasion.title} in {person.nextOccasion.daysUntil} day{person
+													.nextOccasion.daysUntil === 1
+													? ''
+													: 's'}</span
+											>
+										{/if}
 									{/if}
 								{/if}
 							</p>
 						</div>
 						{#if person.is_archived}
 							<span class="badge archived-badge">Archived</span>
+						{:else if person.is_self}
+							<span class="badge self-badge">Self</span>
 						{/if}
 					</a>
 				</li>
@@ -361,6 +369,23 @@
 	.archived-badge {
 		background: var(--line);
 		color: var(--muted);
+	}
+
+	.self-badge {
+		background: var(--amber-soft);
+		color: var(--amber);
+	}
+
+	.self-tag {
+		font-family: var(--font-sans);
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--amber);
+		letter-spacing: 0.02em;
+	}
+
+	.self-meta {
+		color: var(--amber);
 	}
 
 	.row-li {

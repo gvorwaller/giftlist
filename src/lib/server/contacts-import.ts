@@ -138,7 +138,10 @@ export async function previewImport(userId: number): Promise<ContactsPreview> {
 		'SELECT * FROM people WHERE google_resource_name = ?'
 	);
 	const byFullName = db.prepare<[string], Person>(
-		'SELECT * FROM people WHERE full_name = ? AND google_resource_name IS NULL'
+		// Exclude is_self rows so a self-person whose full_name happens to
+		// match a Google contact doesn't get silently adopted (and then have
+		// a birthday assigned to it). Self-people are managed manually.
+		'SELECT * FROM people WHERE full_name = ? AND google_resource_name IS NULL AND is_self = 0'
 	);
 
 	for (const contact of contacts) {
@@ -206,7 +209,10 @@ export function commitImport(
 		'SELECT * FROM people WHERE google_resource_name = ?'
 	);
 	const byFullName = db.prepare<[string], Person>(
-		'SELECT * FROM people WHERE full_name = ? AND google_resource_name IS NULL'
+		// Exclude is_self rows so a self-person whose full_name happens to
+		// match a Google contact doesn't get silently adopted (and then have
+		// a birthday assigned to it). Self-people are managed manually.
+		'SELECT * FROM people WHERE full_name = ? AND google_resource_name IS NULL AND is_self = 0'
 	);
 	const insertPerson = db.prepare(
 		`INSERT INTO people (display_name, full_name, default_shipping_address, notes, google_resource_name)

@@ -9,6 +9,7 @@ export interface PersonUpsertInput {
 	relationship?: string | null;
 	default_shipping_address?: string | null;
 	notes?: string | null;
+	is_self?: boolean;
 }
 
 export interface NextOccasion {
@@ -38,16 +39,20 @@ export interface PersonDetail extends PersonWithContext {
 export interface ListPeopleOptions {
 	search?: string;
 	includeArchived?: boolean;
+	/** Self-people (is_self=1) are personal-order recipients, hidden from
+	 * gift-manager views by default. Admin views opt in via includeSelf=true. */
+	includeSelf?: boolean;
 	sort?: 'upcoming' | 'alphabetical';
 }
 
 export function listPeople(opts: ListPeopleOptions = {}): PersonWithContext[] {
 	const db = getDb();
-	const { search, includeArchived = false, sort = 'alphabetical' } = opts;
+	const { search, includeArchived = false, includeSelf = false, sort = 'alphabetical' } = opts;
 
 	const whereClauses: string[] = [];
 	const params: (string | number)[] = [];
 	if (!includeArchived) whereClauses.push('p.is_archived = 0');
+	if (!includeSelf) whereClauses.push('p.is_self = 0');
 	if (search && search.trim()) {
 		whereClauses.push('(p.display_name LIKE ? OR p.full_name LIKE ?)');
 		const like = `%${search.trim()}%`;
@@ -137,15 +142,16 @@ export function createPerson(input: PersonUpsertInput, actorUserId: number): Per
 	const db = getDb();
 	const info = db
 		.prepare(
-			`INSERT INTO people (display_name, full_name, relationship, default_shipping_address, notes)
-			 VALUES (?, ?, ?, ?, ?)`
+			`INSERT INTO people (display_name, full_name, relationship, default_shipping_address, notes, is_self)
+			 VALUES (?, ?, ?, ?, ?, ?)`
 		)
 		.run(
 			input.display_name,
 			input.full_name ?? null,
 			input.relationship ?? null,
 			input.default_shipping_address ?? null,
-			input.notes ?? null
+			input.notes ?? null,
+			input.is_self ? 1 : 0
 		);
 	const id = Number(info.lastInsertRowid);
 	const person = getPersonById(id)!;
@@ -154,7 +160,9 @@ export function createPerson(input: PersonUpsertInput, actorUserId: number): Per
 		entityType: 'person',
 		entityId: id,
 		action: 'create',
-		summary: `Created person "${person.display_name}"`
+		summary: input.is_self
+			? `Created self-person "${person.display_name}"`
+			: `Created person "${person.display_name}"`
 	});
 	return person;
 }
@@ -168,10 +176,15 @@ export function updatePerson(
 	const before = getPersonById(id);
 	if (!before) throw new Error(`Person ${id} not found`);
 
+	// is_self only mutates when the caller passes it explicitly — admin
+	// forms send it on every save, but the bulk import path leaves it
+	// undefined so we preserve whatever was previously stored.
+	const nextIsSelf = input.is_self === undefined ? before.is_self : input.is_self ? 1 : 0;
 	db.prepare(
 		`UPDATE people
 		    SET display_name = ?, full_name = ?, relationship = ?,
-		        default_shipping_address = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+		        default_shipping_address = ?, notes = ?, is_self = ?,
+		        updated_at = CURRENT_TIMESTAMP
 		  WHERE id = ?`
 	).run(
 		input.display_name,
@@ -179,13 +192,14 @@ export function updatePerson(
 		input.relationship ?? null,
 		input.default_shipping_address ?? null,
 		input.notes ?? null,
+		nextIsSelf,
 		id
 	);
 
 	const after = getPersonById(id)!;
 
 	const changedFields: string[] = [];
-	for (const field of ['display_name', 'full_name', 'relationship', 'default_shipping_address', 'notes'] as const) {
+	for (const field of ['display_name', 'full_name', 'relationship', 'default_shipping_address', 'notes', 'is_self'] as const) {
 		if (before[field] !== after[field]) changedFields.push(field);
 	}
 	logAudit({

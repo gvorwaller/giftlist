@@ -112,7 +112,7 @@ function collectUpcoming(leadDays: number): UpcomingItem[] {
 			        o.month, o.day, o.date, o.reminder_days, o.year,
 			        o.created_at, o.updated_at
 			   FROM person_occasions po
-			   JOIN people p ON p.id = po.person_id AND p.is_archived = 0
+			   JOIN people p ON p.id = po.person_id AND p.is_archived = 0 AND p.is_self = 0
 			   JOIN occasions o ON o.id = po.occasion_id
 			  WHERE po.is_active = 1`
 		)
@@ -189,6 +189,7 @@ function collectPackages(): PackageItem[] {
 			   JOIN people p ON p.id = g.person_id
 			  WHERE g.is_archived = 0
 			    AND g.status IN ('ordered', 'shipped')
+			    AND p.is_self = 0
 			  ORDER BY COALESCE(g.shipped_at, g.ordered_at, g.created_at) ASC`
 		)
 		.all();
