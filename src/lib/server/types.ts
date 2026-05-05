@@ -24,6 +24,7 @@ export interface Person {
 	notes: string | null;
 	is_archived: 0 | 1;
 	is_self: 0 | 1;
+	owner_user_id: number | null;
 	google_resource_name: string | null;
 	created_at: string;
 	updated_at: string;

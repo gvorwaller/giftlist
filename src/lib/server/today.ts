@@ -141,25 +141,31 @@ export function loadTodayData(userId: number): TodayData {
 		)
 		.all();
 
-	// Filter recently_viewed so self-people (and gifts whose person is_self)
-	// don't leak back into the manager Today screen even if a self-person row
-	// exists in the user's recent-history table from before is_self was set.
+	// Filter recently_viewed so self-people don't leak back into Today's
+	// recent-history strip. Per-user scoping (td-68804e): hide every self
+	// entry whose owner isn't the current user — strict inequality denies
+	// foreign-owned AND null-owned rows (treat null as not-mine for safety).
 	const recentlyViewed = db
-		.prepare<[number, number], RecentlyViewed>(
+		.prepare<[number, number, number, number], RecentlyViewed>(
 			`SELECT rv.* FROM recently_viewed rv
 			  WHERE rv.user_id = ?
 			    AND NOT (rv.entity_type = 'person' AND EXISTS (
-			      SELECT 1 FROM people p WHERE p.id = rv.entity_id AND p.is_self = 1
+			      SELECT 1 FROM people p
+			       WHERE p.id = rv.entity_id
+			         AND p.is_self = 1
+			         AND (p.owner_user_id IS NOT ?)
 			    ))
 			    AND NOT (rv.entity_type = 'gift' AND EXISTS (
 			      SELECT 1 FROM gifts g
 			        JOIN people p ON p.id = g.person_id
-			       WHERE g.id = rv.entity_id AND p.is_self = 1
+			       WHERE g.id = rv.entity_id
+			         AND p.is_self = 1
+			         AND (p.owner_user_id IS NOT ?)
 			    ))
 			  ORDER BY rv.viewed_at DESC
 			  LIMIT ?`
 		)
-		.all(userId, 3);
+		.all(userId, userId, userId, 3);
 
 	return {
 		nextBestAction,

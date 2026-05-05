@@ -120,7 +120,9 @@
 							</p>
 							<p class="meta">
 								{#if person.is_self}
-									<span class="self-meta">Personal orders — hidden from manager views</span>
+									<span class="self-meta">
+										Personal tracker{#if person.owner_user_id && data.userMap[person.owner_user_id]} · owner: {data.userMap[person.owner_user_id]}{/if}
+									</span>
 								{:else}
 									{#if person.relationship}
 										{person.relationship}

@@ -10,6 +10,9 @@ export interface PersonUpsertInput {
 	default_shipping_address?: string | null;
 	notes?: string | null;
 	is_self?: boolean;
+	/** Owner of a self-person (the user whose personal orders these are).
+	 * Ignored when is_self is false; defaults to the actor on create. */
+	owner_user_id?: number | null;
 }
 
 export interface NextOccasion {
@@ -42,17 +45,30 @@ export interface ListPeopleOptions {
 	/** Self-people (is_self=1) are personal-order recipients, hidden from
 	 * gift-manager views by default. Admin views opt in via includeSelf=true. */
 	includeSelf?: boolean;
+	/** Optional self-owner filter (td-68804e privacy scoping). When set with
+	 * includeSelf=true, only includes self-people whose owner_user_id matches
+	 * (or whose owner is null — unclaimed). Used by /app/gifts/new and the
+	 * package list so each user only sees their own self-people. */
+	selfOwnerUserId?: number;
 	sort?: 'upcoming' | 'alphabetical';
 }
 
 export function listPeople(opts: ListPeopleOptions = {}): PersonWithContext[] {
 	const db = getDb();
-	const { search, includeArchived = false, includeSelf = false, sort = 'alphabetical' } = opts;
+	const { search, includeArchived = false, includeSelf = false, selfOwnerUserId, sort = 'alphabetical' } = opts;
 
 	const whereClauses: string[] = [];
 	const params: (string | number)[] = [];
 	if (!includeArchived) whereClauses.push('p.is_archived = 0');
-	if (!includeSelf) whereClauses.push('p.is_self = 0');
+	if (!includeSelf) {
+		whereClauses.push('p.is_self = 0');
+	} else if (selfOwnerUserId !== undefined) {
+		// Self rows must match this user. Non-self rows pass. Strict equality
+		// — null-owner self rows shouldn't exist (forms + backfill always set
+		// owner) and treating them as visible would be a leak.
+		whereClauses.push('(p.is_self = 0 OR p.owner_user_id = ?)');
+		params.push(selfOwnerUserId);
+	}
 	if (search && search.trim()) {
 		whereClauses.push('(p.display_name LIKE ? OR p.full_name LIKE ?)');
 		const like = `%${search.trim()}%`;
@@ -114,6 +130,29 @@ export function getPersonById(id: number): Person | undefined {
 	return db.prepare<[number], Person>('SELECT * FROM people WHERE id = ?').get(id);
 }
 
+/**
+ * Returns true if `userId` is allowed to act on `personId` from the manager
+ * /app/* surface — i.e. the row exists, isn't archived, and (if it's a
+ * self-person) is owned by `userId`. Use as a server-side guard on POST
+ * actions that accept a `person_id` from the form. Without this, a crafted
+ * POST could create or reassign a gift onto another user's self-person
+ * even though the dropdown filter hides them client-side (td-68804e).
+ */
+export function isPersonVisibleToUser(personId: number, userId: number): boolean {
+	const db = getDb();
+	const row = db
+		.prepare<[number], Pick<Person, 'is_archived' | 'is_self' | 'owner_user_id'>>(
+			'SELECT is_archived, is_self, owner_user_id FROM people WHERE id = ?'
+		)
+		.get(personId);
+	if (!row) return false;
+	if (row.is_archived === 1) return false;
+	// Strict equality — null owner on a self-row means orphaned (e.g. a
+	// future user-deletion edge case); deny rather than fall open.
+	if (row.is_self === 1 && row.owner_user_id !== userId) return false;
+	return true;
+}
+
 export function getPersonWithContext(id: number): PersonDetail | undefined {
 	const person = getPersonById(id);
 	if (!person) return undefined;
@@ -140,10 +179,13 @@ export function listGiftsForPerson(personId: number): GiftWithOccasion[] {
 
 export function createPerson(input: PersonUpsertInput, actorUserId: number): Person {
 	const db = getDb();
+	// owner_user_id only meaningful for self-rows. Default to creator when
+	// is_self is set and no explicit owner was passed.
+	const ownerUserId = input.is_self ? (input.owner_user_id ?? actorUserId) : null;
 	const info = db
 		.prepare(
-			`INSERT INTO people (display_name, full_name, relationship, default_shipping_address, notes, is_self)
-			 VALUES (?, ?, ?, ?, ?, ?)`
+			`INSERT INTO people (display_name, full_name, relationship, default_shipping_address, notes, is_self, owner_user_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`
 		)
 		.run(
 			input.display_name,
@@ -151,7 +193,8 @@ export function createPerson(input: PersonUpsertInput, actorUserId: number): Per
 			input.relationship ?? null,
 			input.default_shipping_address ?? null,
 			input.notes ?? null,
-			input.is_self ? 1 : 0
+			input.is_self ? 1 : 0,
+			ownerUserId
 		);
 	const id = Number(info.lastInsertRowid);
 	const person = getPersonById(id)!;
@@ -161,7 +204,7 @@ export function createPerson(input: PersonUpsertInput, actorUserId: number): Per
 		entityId: id,
 		action: 'create',
 		summary: input.is_self
-			? `Created self-person "${person.display_name}"`
+			? `Created self-person "${person.display_name}" (owner user ${ownerUserId})`
 			: `Created person "${person.display_name}"`
 	});
 	return person;
@@ -178,12 +221,19 @@ export function updatePerson(
 
 	// is_self only mutates when the caller passes it explicitly — admin
 	// forms send it on every save, but the bulk import path leaves it
-	// undefined so we preserve whatever was previously stored.
+	// undefined so we preserve whatever was previously stored. Same pattern
+	// for owner_user_id; flipping is_self off auto-clears owner.
 	const nextIsSelf = input.is_self === undefined ? before.is_self : input.is_self ? 1 : 0;
+	const nextOwnerUserId = (() => {
+		if (nextIsSelf === 0) return null;
+		if (input.owner_user_id !== undefined) return input.owner_user_id;
+		return before.owner_user_id ?? null;
+	})();
 	db.prepare(
 		`UPDATE people
 		    SET display_name = ?, full_name = ?, relationship = ?,
 		        default_shipping_address = ?, notes = ?, is_self = ?,
+		        owner_user_id = ?,
 		        updated_at = CURRENT_TIMESTAMP
 		  WHERE id = ?`
 	).run(
@@ -193,13 +243,14 @@ export function updatePerson(
 		input.default_shipping_address ?? null,
 		input.notes ?? null,
 		nextIsSelf,
+		nextOwnerUserId,
 		id
 	);
 
 	const after = getPersonById(id)!;
 
 	const changedFields: string[] = [];
-	for (const field of ['display_name', 'full_name', 'relationship', 'default_shipping_address', 'notes', 'is_self'] as const) {
+	for (const field of ['display_name', 'full_name', 'relationship', 'default_shipping_address', 'notes', 'is_self', 'owner_user_id'] as const) {
 		if (before[field] !== after[field]) changedFields.push(field);
 	}
 	logAudit({

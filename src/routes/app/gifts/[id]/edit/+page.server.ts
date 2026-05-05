@@ -2,7 +2,7 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { getGiftWithContext, parseDollarsToCents, priceDollarsInput, updateGift } from '$server/gifts';
 import { listPersonOccasions } from '$server/occasions';
-import { getPersonById, listPeople } from '$server/people';
+import { getPersonById, isPersonVisibleToUser, listPeople } from '$server/people';
 import { listVendors, getVendorById } from '$server/vendors';
 import { listShippers, getShipperById } from '$server/shippers';
 import { registerWithProvider } from '$server/tracking';
@@ -21,17 +21,22 @@ function numOrNull(v: string): number | null {
 	return Number.isInteger(n) ? n : null;
 }
 
-function requireGift(params: { id: string }) {
+function requireGift(params: { id: string }, currentUserId: number | undefined) {
 	const id = Number(params.id);
 	if (!Number.isInteger(id)) throw error(400, 'Invalid gift id');
 	const gift = getGiftWithContext(id);
 	if (!gift) throw error(404, 'Gift not found');
+	// Self-orders are private to their owner_user_id (td-68804e). Strict
+	// equality denies foreign-owned AND orphaned (null-owner) self-gifts.
+	if (gift.person.is_self === 1 && gift.person.owner_user_id !== currentUserId) {
+		throw error(404, 'Gift not found');
+	}
 	return gift;
 }
 
 export const load: PageServerLoad = ({ params, locals }) => {
 	if (!locals.user) throw redirect(303, '/login');
-	const gift = requireGift(params);
+	const gift = requireGift(params, locals.user.id);
 	// Always include the gift's currently-linked vendor in the dropdown even
 	// if it's archived, so editing an old gift doesn't silently lose the link.
 	const activeVendors = listVendors({ includeArchived: false });
@@ -50,10 +55,13 @@ export const load: PageServerLoad = ({ params, locals }) => {
 
 	// Include self-people so editing a self-order keeps its current person_id
 	// in the <select> options. The gift form supports self-people end-to-end
-	// (no occasion auto-pick, "(me)" suffix in the UI).
+	// (no occasion auto-pick, "(me)" suffix in the UI). Per-user scoping
+	// (td-68804e): only show self-people the current user owns, so manager
+	// can't reassign her gifts to admin's self.
 	const peopleList = listPeople({
 		includeArchived: false,
 		includeSelf: true,
+		selfOwnerUserId: locals.user.id,
 		sort: 'alphabetical'
 	});
 
@@ -72,7 +80,7 @@ export const load: PageServerLoad = ({ params, locals }) => {
 export const actions: Actions = {
 	save: async ({ params, request, locals }) => {
 		if (!locals.user) throw redirect(303, '/login');
-		const gift = requireGift(params);
+		const gift = requireGift(params, locals.user.id);
 		const fd = await request.formData();
 
 		const title = trim(fd.get('title'));
@@ -81,7 +89,12 @@ export const actions: Actions = {
 		}
 
 		const person_id = Number(fd.get('person_id'));
-		if (!Number.isInteger(person_id) || !getPersonById(person_id)) {
+		// Privacy guard (td-68804e) — see /app/gifts/new for rationale.
+		if (
+			!Number.isInteger(person_id) ||
+			!getPersonById(person_id) ||
+			!isPersonVisibleToUser(person_id, locals.user.id)
+		) {
 			return fail(400, { error: 'Choose who the gift is for.', values: formValues(fd) });
 		}
 

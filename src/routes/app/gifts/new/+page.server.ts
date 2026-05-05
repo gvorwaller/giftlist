@@ -1,6 +1,6 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { listPeople, getPersonById } from '$server/people';
+import { listPeople, getPersonById, isPersonVisibleToUser } from '$server/people';
 import { listPersonOccasions, nextOccurrenceDate } from '$server/occasions';
 import { createGift, parseDollarsToCents } from '$server/gifts';
 import { deleteDraft, getFreshDraft, parseDraftPayload } from '$server/drafts';
@@ -42,8 +42,15 @@ export const load: PageServerLoad = ({ locals, url }) => {
 	if (!locals.user) throw redirect(303, '/login');
 
 	// Include self-people in the dropdown so personal orders can be entered
-	// here too (see td-24eac3). The .svelte side flags them with " (me)".
-	const people = listPeople({ includeArchived: false, includeSelf: true, sort: 'alphabetical' });
+	// here too (see td-24eac3). Scoped per-user (td-68804e): each signed-in
+	// user only sees their own self-people, never the other user's. The
+	// .svelte side flags them with " (me)".
+	const people = listPeople({
+		includeArchived: false,
+		includeSelf: true,
+		selfOwnerUserId: locals.user.id,
+		sort: 'alphabetical'
+	});
 	const preselectedPersonId = url.searchParams.get('person');
 	let prefill: GiftDraftPayload = {};
 	let draftUpdatedAt: string | null = null;
@@ -55,7 +62,9 @@ export const load: PageServerLoad = ({ locals, url }) => {
 	}
 	if (preselectedPersonId && !prefill.person_id) {
 		const pid = Number(preselectedPersonId);
-		if (Number.isInteger(pid) && getPersonById(pid)) {
+		// Same privacy guard on the ?person= prefill: don't honor a query
+		// param that points at another user's self-person.
+		if (Number.isInteger(pid) && isPersonVisibleToUser(pid, locals.user.id)) {
 			prefill.person_id = pid;
 		}
 	}
@@ -114,7 +123,15 @@ export const actions: Actions = {
 
 		const person_id = Number(fd.get('person_id'));
 		const title = trim(fd.get('title'));
-		if (!Number.isInteger(person_id) || !getPersonById(person_id)) {
+		// Server-side privacy check (td-68804e): the dropdown is filtered
+		// client-side, but a crafted POST could still target another user's
+		// self-person. isPersonVisibleToUser denies archived people and any
+		// self-person not owned by the current user.
+		if (
+			!Number.isInteger(person_id) ||
+			!getPersonById(person_id) ||
+			!isPersonVisibleToUser(person_id, locals.user.id)
+		) {
 			return fail(400, { error: 'Choose who the gift is for.', values: formValues(fd) });
 		}
 		if (!title) {

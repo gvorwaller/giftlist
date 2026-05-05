@@ -33,6 +33,20 @@ export function findUserByUsername(username: string): User | undefined {
 		.get(username);
 }
 
+/** All users, ordered admin-first then by id. Used for the self-person
+ *  owner picker on /admin/people. */
+export function listUsers(): User[] {
+	const db = getDb();
+	return db
+		.prepare<[], User>(
+			`SELECT id, username, password_hash, role, display_name,
+			        last_login_at, last_seen_path, last_seen_at, created_at
+			   FROM users
+			  ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, id ASC`
+		)
+		.all();
+}
+
 export function findManagerUser(): User | null {
 	const db = getDb();
 	return (

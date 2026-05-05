@@ -10,6 +10,7 @@ import {
 	removePersonOccasion
 } from '$server/occasions';
 import { logAudit } from '$server/audit';
+import { listUsers } from '$server/auth';
 
 function str(fd: FormData, key: string): string {
 	const v = fd.get(key);
@@ -29,25 +30,75 @@ function requirePerson(params: { id: string }) {
 	return { id, person };
 }
 
-export const load: PageServerLoad = ({ params }) => {
+export const load: PageServerLoad = ({ params, locals }) => {
 	const { person } = requirePerson(params);
+	const currentUserId = locals.user?.id ?? null;
 	return {
 		person,
 		personOccasions: listPersonOccasions(person.id),
-		sharedOccasions: listSharedOccasions()
+		sharedOccasions: listSharedOccasions(),
+		users: listUsers().map((u) => ({
+			id: u.id,
+			username: u.username,
+			role: u.role,
+			display_name: u.display_name,
+			isMe: u.id === currentUserId
+		}))
 	};
 };
 
 export const actions: Actions = {
 	update: async ({ params, request, locals }) => {
 		if (!locals.user) throw redirect(303, '/login');
-		const { id } = requirePerson(params);
+		const { id, person: before } = requirePerson(params);
 		const fd = await request.formData();
 		const display_name = str(fd, 'display_name');
+
+		// Capture submitted values upfront so any fail() preserves them on the
+		// re-rendered form (otherwise the page snaps back to stored data and
+		// the user loses what they typed).
+		const submittedValues = {
+			display_name,
+			full_name: str(fd, 'full_name'),
+			relationship: str(fd, 'relationship'),
+			default_shipping_address: str(fd, 'default_shipping_address'),
+			notes: str(fd, 'notes'),
+			is_self: fd.get('is_self') === 'on' || fd.get('is_self') === '1',
+			owner_user_id: str(fd, 'owner_user_id')
+		};
+
 		if (!display_name) {
-			return fail(400, { scope: 'update', error: 'Display name is required.' });
+			return fail(400, {
+				scope: 'update',
+				error: 'Display name is required.',
+				values: submittedValues
+			});
 		}
-		const is_self = fd.get('is_self') === 'on' || fd.get('is_self') === '1';
+
+		const is_self = submittedValues.is_self;
+		const ownerRaw = submittedValues.owner_user_id;
+		// When is_self is set but owner is empty, fall back to the prior owner
+		// (if there was one) or the current actor — never to null. NULL owner
+		// on a self-person would either hide it from everyone (with the strict
+		// filter we now use) or leak it to all users (with a permissive one);
+		// neither is desirable.
+		let owner_user_id: number | null;
+		if (!is_self) {
+			owner_user_id = null;
+		} else if (ownerRaw) {
+			const parsed = Number(ownerRaw);
+			if (!Number.isInteger(parsed)) {
+				return fail(400, {
+					scope: 'update',
+					error: 'Pick a valid owner for the self-person.',
+					values: submittedValues
+				});
+			}
+			owner_user_id = parsed;
+		} else {
+			owner_user_id = before.owner_user_id ?? locals.user.id;
+		}
+
 		updatePerson(
 			id,
 			{
@@ -56,7 +107,8 @@ export const actions: Actions = {
 				relationship: nullable(fd, 'relationship'),
 				default_shipping_address: nullable(fd, 'default_shipping_address'),
 				notes: nullable(fd, 'notes'),
-				is_self
+				is_self,
+				owner_user_id
 			},
 			locals.user.id
 		);

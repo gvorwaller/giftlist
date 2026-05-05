@@ -2,6 +2,7 @@ import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { listPeople } from '$server/people';
 import { assignOccasionToPerson, listSharedOccasions } from '$server/occasions';
+import { listUsers } from '$server/auth';
 
 export const load: PageServerLoad = ({ url }) => {
 	const search = url.searchParams.get('q') ?? '';
@@ -10,7 +11,12 @@ export const load: PageServerLoad = ({ url }) => {
 	const sort: 'upcoming' | 'alphabetical' = sortParam === 'alphabetical' ? 'alphabetical' : 'upcoming';
 	const people = listPeople({ search, includeArchived, includeSelf: true, sort });
 	const sharedOccasions = listSharedOccasions();
-	return { people, search, includeArchived, sort, sharedOccasions };
+	// Build a quick lookup so the listing can render "Self · Madonna" instead
+	// of just "Self" when admin needs to distinguish whose tracker it is.
+	const userMap = Object.fromEntries(
+		listUsers().map((u) => [u.id, u.display_name])
+	) as Record<number, string>;
+	return { people, search, includeArchived, sort, sharedOccasions, userMap };
 };
 
 export const actions: Actions = {

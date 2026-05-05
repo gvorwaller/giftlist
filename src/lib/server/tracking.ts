@@ -250,8 +250,16 @@ function formatLocation(loc: ShippoLocation | null | undefined): string | null {
  * isn't already in a terminal state. Used by the scheduled `tracking.refresh`
  * job; bounded concurrency to stay polite against Shippo's API at our scale
  * (a couple dozen rows max).
+ *
+ * `viewerUserId` is the privacy-scoping knob (td-68804e). When provided,
+ * only the viewer's own self-orders + all shared (non-self) gifts are
+ * considered. Pass null/undefined ONLY from admin-side or scheduled-job
+ * call sites where the full set is intended.
  */
-export async function pullAllInFlight(actorUserId: number): Promise<{
+export async function pullAllInFlight(
+	actorUserId: number,
+	viewerUserId?: number | null
+): Promise<{
 	checked: number;
 	updated: number;
 	failed: number;
@@ -260,14 +268,28 @@ export async function pullAllInFlight(actorUserId: number): Promise<{
 	if (!cfg) return { checked: 0, updated: 0, failed: 0 };
 
 	const db = getDb();
-	const rows = db
-		.prepare<[], Pick<Gift, 'id' | 'tracking_status'>>(
-			`SELECT id, tracking_status
-			   FROM gifts
-			  WHERE is_archived = 0
-			    AND tracking_provider_id IS NOT NULL`
-		)
-		.all();
+	const rows = (() => {
+		if (viewerUserId == null) {
+			return db
+				.prepare<[], Pick<Gift, 'id' | 'tracking_status'>>(
+					`SELECT g.id, g.tracking_status
+					   FROM gifts g
+					  WHERE g.is_archived = 0
+					    AND g.tracking_provider_id IS NOT NULL`
+				)
+				.all();
+		}
+		return db
+			.prepare<[number], Pick<Gift, 'id' | 'tracking_status'>>(
+				`SELECT g.id, g.tracking_status
+				   FROM gifts g
+				   JOIN people p ON p.id = g.person_id
+				  WHERE g.is_archived = 0
+				    AND g.tracking_provider_id IS NOT NULL
+				    AND (p.is_self = 0 OR p.owner_user_id = ?)`
+			)
+			.all(viewerUserId);
+	})();
 
 	const inFlight = rows.filter(
 		(r) => !r.tracking_status || !TERMINAL_STATUSES.has(r.tracking_status)

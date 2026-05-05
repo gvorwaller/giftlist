@@ -11,16 +11,23 @@ import {
 } from '$server/tracking';
 import type { GiftStatus } from '$server/types';
 
-function requireGift(params: { id: string }) {
+function requireGift(params: { id: string }, currentUserId: number | undefined) {
 	const id = Number(params.id);
 	if (!Number.isInteger(id)) throw error(400, 'Invalid gift id');
 	const gift = getGiftWithContext(id);
 	if (!gift) throw error(404, 'Gift not found');
+	// Self-orders are private to their owner_user_id (td-68804e). Strict
+	// equality denies foreign-owned AND null-owned (orphaned) self-gifts.
+	// Manager mustn't peek at admin's personal packages via direct URL, and
+	// an unowned self-row shouldn't be reachable to anyone in /app.
+	if (gift.person.is_self === 1 && gift.person.owner_user_id !== currentUserId) {
+		throw error(404, 'Gift not found');
+	}
 	return gift;
 }
 
 export const load: PageServerLoad = ({ params, locals }) => {
-	const gift = requireGift(params);
+	const gift = requireGift(params, locals.user?.id);
 	if (locals.user) {
 		recordView(
 			locals.user.id,
@@ -41,7 +48,7 @@ async function doTransition(
 	to: GiftStatus,
 	userId: number
 ) {
-	const gift = requireGift(params);
+	const gift = requireGift(params, userId);
 	if (!canTransition(gift.status, to)) {
 		return fail(409, { error: `Can't mark "${gift.title}" as ${to} from ${gift.status}.` });
 	}
@@ -80,13 +87,13 @@ export const actions: Actions = {
 	},
 	archive: ({ params, locals }) => {
 		if (!locals.user) throw redirect(303, '/login');
-		const gift = requireGift(params);
+		const gift = requireGift(params, locals.user.id);
 		archiveGift(gift.id, true, locals.user.id);
 		throw redirect(303, `/app/gifts/${gift.id}`);
 	},
 	unarchive: ({ params, locals }) => {
 		if (!locals.user) throw redirect(303, '/login');
-		const gift = requireGift(params);
+		const gift = requireGift(params, locals.user.id);
 		archiveGift(gift.id, false, locals.user.id);
 		throw redirect(303, `/app/gifts/${gift.id}`);
 	},
@@ -97,7 +104,7 @@ export const actions: Actions = {
 	// success/failure inline rather than as a flash so it's clear what happened.
 	refreshTracking: async ({ params, locals }) => {
 		if (!locals.user) throw redirect(303, '/login');
-		const gift = requireGift(params);
+		const gift = requireGift(params, locals.user.id);
 		// Use 4xx status codes for these failures even though they're "upstream"
 		// errors. Cloudflare swaps 5xx upstream responses for its branded "Bad
 		// gateway" page, which hides our inline error message — defeats the

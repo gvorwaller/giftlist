@@ -1,11 +1,13 @@
 <script lang="ts">
-	import type { ActionData } from './$types';
+	import { untrack } from 'svelte';
+	import type { ActionData, PageData } from './$types';
 
 	interface Props {
+		data: PageData;
 		form: ActionData;
 	}
 
-	let { form }: Props = $props();
+	let { data, form }: Props = $props();
 
 	interface Values {
 		display_name?: string;
@@ -14,9 +16,20 @@
 		default_shipping_address?: string;
 		notes?: string;
 		is_self?: boolean;
+		owner_user_id?: string | number;
 	}
 
 	const values = $derived<Values>(form?.values ?? {});
+	// Show the owner picker only when is_self is on (else it's meaningless).
+	// Initial values come from the form-rejected payload if present, else
+	// defaults. untrack so this runs once at mount, not on every prop tick.
+	let isSelf = $state<boolean>(untrack(() => form?.values?.is_self ?? false));
+	let ownerUserId = $state<string>(
+		untrack(() => {
+			const me = data.users.find((u) => u.isMe);
+			return String(form?.values?.owner_user_id ?? me?.id ?? '');
+		})
+	);
 </script>
 
 <svelte:head>
@@ -74,12 +87,26 @@
 		</label>
 
 		<label class="checkbox">
-			<input type="checkbox" name="is_self" checked={values.is_self ?? false} />
+			<input type="checkbox" name="is_self" bind:checked={isSelf} />
 			<span class="checkbox-label">
-				This is me (personal package tracking)
-				<small>Self-people are hidden from /app/today, /app/people, and reminder digests. Their orders still appear on /app/packages.</small>
+				This is a personal-package tracker for a user
+				<small>Self-people are hidden from /app/today, /app/people, and reminder digests. Their orders only appear on the owner's /app/packages.</small>
 			</span>
 		</label>
+
+		{#if isSelf}
+			<label>
+				<span>Owner <em>required for self</em></span>
+				<select name="owner_user_id" bind:value={ownerUserId} required>
+					{#each data.users as u (u.id)}
+						<option value={String(u.id)}>
+							{u.display_name} ({u.role}){u.isMe ? ' — me' : ''}
+						</option>
+					{/each}
+				</select>
+				<small>Only this user will see these packages on their /app/packages.</small>
+			</label>
+		{/if}
 
 		{#if form?.error}
 			<p class="error" role="alert">{form.error}</p>

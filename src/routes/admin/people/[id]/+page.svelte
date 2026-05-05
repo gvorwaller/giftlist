@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import type { ActionData, PageData } from './$types';
 
 	interface Props {
@@ -10,6 +11,28 @@
 
 	let confirmingArchive = $state(false);
 	let confirmingRemoveOccasionId = $state<number | null>(null);
+	// untrack initialization — seeded from form.values (failed submit) when
+	// present, else from the stored row. Without untrack Svelte warns that
+	// the prop reads only capture initial values; with untrack we deliberately
+	// take a one-time snapshot since the inputs are then form-owned.
+	const initial = untrack(() => {
+		const failed = (form?.scope === 'update' && form?.values) ? form.values : null;
+		const meId = data.users.find((u) => u.isMe)?.id ?? null;
+		return {
+			display_name: failed?.display_name ?? data.person.display_name,
+			full_name: failed?.full_name ?? data.person.full_name ?? '',
+			relationship: failed?.relationship ?? data.person.relationship ?? '',
+			default_shipping_address:
+				failed?.default_shipping_address ?? data.person.default_shipping_address ?? '',
+			notes: failed?.notes ?? data.person.notes ?? '',
+			is_self: failed?.is_self ?? data.person.is_self === 1,
+			owner_user_id:
+				failed?.owner_user_id ??
+				String(data.person.owner_user_id ?? meId ?? '')
+		};
+	});
+	let isSelf = $state<boolean>(initial.is_self);
+	let ownerUserId = $state<string>(initial.owner_user_id);
 
 	function monthName(m: number | null): string {
 		if (!m) return '';
@@ -57,34 +80,48 @@
 		<form method="POST" action="?/update">
 			<label>
 				<span>Display name</span>
-				<input name="display_name" type="text" required value={data.person.display_name} />
+				<input name="display_name" type="text" required value={initial.display_name} />
 			</label>
 			<label>
 				<span>Full name</span>
-				<input name="full_name" type="text" value={data.person.full_name ?? ''} />
+				<input name="full_name" type="text" value={initial.full_name} />
 			</label>
 			<label>
 				<span>Relationship</span>
-				<input name="relationship" type="text" value={data.person.relationship ?? ''} />
+				<input name="relationship" type="text" value={initial.relationship} />
 			</label>
 			<label>
 				<span>Default shipping address</span>
 				<textarea name="default_shipping_address" rows="3"
-					>{data.person.default_shipping_address ?? ''}</textarea
+					>{initial.default_shipping_address}</textarea
 				>
 			</label>
 			<label>
 				<span>Notes</span>
-				<textarea name="notes" rows="3">{data.person.notes ?? ''}</textarea>
+				<textarea name="notes" rows="3">{initial.notes}</textarea>
 			</label>
 
 			<label class="checkbox">
-				<input type="checkbox" name="is_self" checked={data.person.is_self === 1} />
+				<input type="checkbox" name="is_self" bind:checked={isSelf} />
 				<span class="checkbox-label">
-					This is me (personal package tracking)
-					<small>Self-people are hidden from /app/today, /app/people, and reminder digests. Their orders still appear on /app/packages.</small>
+					This is a personal-package tracker for a user
+					<small>Self-people are hidden from /app/today, /app/people, and reminder digests. Their orders only appear on the owner's /app/packages.</small>
 				</span>
 			</label>
+
+			{#if isSelf}
+				<label>
+					<span>Owner <em>required for self</em></span>
+					<select name="owner_user_id" bind:value={ownerUserId} required>
+						{#each data.users as u (u.id)}
+							<option value={String(u.id)}>
+								{u.display_name} ({u.role}){u.isMe ? ' — me' : ''}
+							</option>
+						{/each}
+					</select>
+					<small>Only this user will see these packages on their /app/packages.</small>
+				</label>
+			{/if}
 
 			{#if form?.scope === 'update' && form.error}
 				<p class="error" role="alert">{form.error}</p>
@@ -574,5 +611,19 @@
 		font-size: 13px;
 		color: var(--muted);
 		font-weight: 400;
+	}
+
+	label small {
+		font-family: var(--font-sans);
+		font-size: 13px;
+		color: var(--muted);
+		font-weight: 400;
+	}
+
+	label em {
+		font-style: normal;
+		color: var(--muted);
+		font-weight: 500;
+		margin-left: 4px;
 	}
 </style>
