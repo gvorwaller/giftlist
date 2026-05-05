@@ -75,7 +75,22 @@ async function shippoFetch<T>(
 	});
 	const text = await res.text();
 	if (!res.ok) {
-		throw new Error(`Shippo ${method} ${path} failed: HTTP ${res.status} ${text.slice(0, 300)}`);
+		// Shippo returns errors as JSON like {"detail": "human-readable message"}
+		// on most paths (auth, billing, validation). Surface that detail string
+		// directly so the action's `trackingError` is something the user can
+		// read instead of "HTTP 401 {detail:..."}". Falls back to the raw body
+		// when the response isn't JSON.
+		let detail: string | null = null;
+		try {
+			const parsed = JSON.parse(text);
+			if (parsed && typeof parsed.detail === 'string') {
+				detail = parsed.detail;
+			}
+		} catch {
+			/* not JSON — fall through */
+		}
+		const summary = detail ?? text.slice(0, 300);
+		throw new Error(`Shippo (HTTP ${res.status}): ${summary}`);
 	}
 	return JSON.parse(text) as T;
 }

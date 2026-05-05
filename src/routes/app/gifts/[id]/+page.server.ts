@@ -98,8 +98,12 @@ export const actions: Actions = {
 	refreshTracking: async ({ params, locals }) => {
 		if (!locals.user) throw redirect(303, '/login');
 		const gift = requireGift(params);
+		// Use 4xx status codes for these failures even though they're "upstream"
+		// errors. Cloudflare swaps 5xx upstream responses for its branded "Bad
+		// gateway" page, which hides our inline error message — defeats the
+		// whole point of returning structured form data here.
 		if (!isTrackingProviderConfigured()) {
-			return fail(503, { trackingError: 'Shippo not configured.' });
+			return fail(400, { trackingError: 'Shippo not configured.' });
 		}
 		try {
 			if (!gift.tracking_provider_id) {
@@ -111,7 +115,7 @@ export const actions: Actions = {
 				await pullStatus(gift.id, locals.user.id);
 			}
 		} catch (err) {
-			return fail(502, {
+			return fail(400, {
 				trackingError: err instanceof Error ? err.message : 'Tracking refresh failed.'
 			});
 		}

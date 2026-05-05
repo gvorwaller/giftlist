@@ -27,8 +27,10 @@ export const actions: Actions = {
 	// terminal-state shipments are skipped server-side.
 	refreshAll: async ({ locals }) => {
 		if (!locals.user) throw redirect(303, '/login');
+		// 4xx instead of 5xx so Cloudflare doesn't swap the response body for
+		// its branded "Bad gateway" page — we want our inline error to render.
 		if (!isTrackingProviderConfigured()) {
-			return fail(503, { trackingError: 'Shippo not configured.' });
+			return fail(400, { trackingError: 'Shippo not configured.' });
 		}
 		try {
 			const result = await pullAllInFlight(locals.user.id);
@@ -39,7 +41,7 @@ export const actions: Actions = {
 				failed: result.failed
 			};
 		} catch (err) {
-			return fail(502, {
+			return fail(400, {
 				trackingError: err instanceof Error ? err.message : 'Refresh failed.'
 			});
 		}
