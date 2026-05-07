@@ -55,6 +55,13 @@ function setCurrentVersion(db: DB, version: number): void {
 /**
  * Runs any migrations whose version > current schema_version.
  * Each migration runs inside a transaction.
+ *
+ * Foreign keys are toggled OFF before each migration's transaction and ON
+ * after. SQLite's documented "12-step" recreate-table pattern requires
+ * foreign_keys=OFF *outside* the transaction (the pragma is a no-op inside
+ * one), so doing it here gives every migration access to that pattern.
+ * After commit we run `PRAGMA foreign_key_check` and abort if the migration
+ * left any orphan rows behind.
  */
 export function runMigrations(db: DB): { applied: number[]; currentVersion: number } {
 	const migrations = loadMigrations();
@@ -63,10 +70,26 @@ export function runMigrations(db: DB): { applied: number[]; currentVersion: numb
 	const applied: number[] = [];
 
 	for (const m of pending) {
-		db.transaction(() => {
-			db.exec(m.sql);
-			setCurrentVersion(db, m.version);
-		})();
+		db.pragma('foreign_keys = OFF');
+		try {
+			db.transaction(() => {
+				db.exec(m.sql);
+				setCurrentVersion(db, m.version);
+			})();
+			const violations = db.pragma('foreign_key_check') as Array<{
+				table: string;
+				rowid: number;
+				parent: string;
+				fkid: number;
+			}>;
+			if (violations.length > 0) {
+				throw new Error(
+					`Migration ${m.version} left ${violations.length} foreign-key violation(s): ${JSON.stringify(violations)}`
+				);
+			}
+		} finally {
+			db.pragma('foreign_keys = ON');
+		}
 		applied.push(m.version);
 		console.log(`[migrate] applied ${String(m.version).padStart(3, '0')}-${m.name}`);
 	}

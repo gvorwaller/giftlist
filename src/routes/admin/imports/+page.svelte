@@ -55,6 +55,24 @@
 			<p class="body">Connect Google in <a href="/admin/settings">Settings</a> first.</p>
 		{/if}
 	</section>
+
+	<section class="card">
+		<div class="row">
+			<div>
+				<h2>Tracking email parsing</h2>
+				<p class="body">
+					Scan the <code>Giftlist/Tracking/Inbox</code> label for non-Amazon shipment
+					confirmations (UPS, USPS, FedEx, DHL, OnTrac, Lasership, Canada Post). Accepted
+					rows create a self-package and register the tracking number with Shippo.
+				</p>
+			</div>
+		</div>
+		{#if data.googleConnected}
+			<a class="primary" href="/admin/imports/tracking">Open tracking import</a>
+		{:else}
+			<p class="body">Connect Google in <a href="/admin/settings">Settings</a> first.</p>
+		{/if}
+	</section>
 </main>
 
 <style>

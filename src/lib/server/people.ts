@@ -131,6 +131,26 @@ export function getPersonById(id: number): Person | undefined {
 }
 
 /**
+ * Returns the self-person owned by `actorUserId`. Throws if none exists —
+ * the tracking importer (td-61017c) and other auto-create flows assume
+ * a single canonical self-row per user, which td-68804e backfilled for
+ * the existing admin. If you hit this error, create one via
+ * /admin/people/new with "Personal orders" checked first.
+ */
+export function getOrCreateSelfPerson(actorUserId: number): Person {
+	const db = getDb();
+	const existing = db
+		.prepare<[number], Person>(
+			'SELECT * FROM people WHERE is_self = 1 AND owner_user_id = ? AND is_archived = 0 ORDER BY id ASC LIMIT 1'
+		)
+		.get(actorUserId);
+	if (existing) return existing;
+	throw new Error(
+		`No self-person found for user ${actorUserId}; create one via /admin/people/new (check "Personal orders") before running the tracking importer.`
+	);
+}
+
+/**
  * Returns true if `userId` is allowed to act on `personId` from the manager
  * /app/* surface — i.e. the row exists, isn't archived, and (if it's a
  * self-person) is owned by `userId`. Use as a server-side guard on POST

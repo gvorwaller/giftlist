@@ -163,7 +163,7 @@ export interface PersonAlias {
 	created_at: string;
 }
 
-export type ImportRunSource = 'amazon_email';
+export type ImportRunSource = 'amazon_email' | 'tracking_email';
 export type ImportRunStatus = 'running' | 'ready_for_review' | 'committed' | 'error';
 
 export interface ImportRun {
@@ -186,7 +186,8 @@ export type EmailType =
 	| 'delivered'
 	| 'marketing'
 	| 'review_request'
-	| 'unknown';
+	| 'unknown'
+	| 'tracking_only';
 
 export type ImportRowDisposition = 'pending' | 'accepted' | 'skipped' | 'failed';
 export type MatchConfidence = 'exact' | 'alias' | 'fuzzy' | 'none';
@@ -208,6 +209,7 @@ export interface ImportRow {
 	parsed_recipient_name: string | null;
 	parsed_shipping_address: string | null;
 	parsed_gift_message: string | null;
+	parsed_sender_domain: string | null;
 	match_person_id: number | null;
 	match_confidence: MatchConfidence | null;
 	match_candidates_json: string | null;

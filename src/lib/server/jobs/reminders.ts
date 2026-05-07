@@ -31,6 +31,10 @@ export interface PendingImports {
 	latestRunId: number | null;
 	latestRunStartedAt: string | null;
 	reviewUrl: string;
+	/** Bucketed counts so the digest can show per-source pending totals
+	 * even when only one source has the latest run. */
+	amazonCount: number;
+	trackingCount: number;
 }
 
 export interface ReminderSummary {
@@ -66,31 +70,54 @@ function getBaseUrl(): string {
 
 function collectPendingImports(): PendingImports | null {
 	const db = getDb();
-	const row = db
-		.prepare<[], { cnt: number }>(
-			`SELECT COUNT(*) AS cnt FROM import_rows WHERE disposition = 'pending'`
+	// Per-source pending counts so the digest can route admins to the right
+	// review page when both sources have backlog (td-61017c).
+	const sourced = db
+		.prepare<[], { source: string; cnt: number }>(
+			`SELECT r.source AS source, COUNT(*) AS cnt
+			   FROM import_rows ir
+			   JOIN import_runs r ON r.id = ir.import_run_id
+			  WHERE ir.disposition = 'pending'
+			  GROUP BY r.source`
 		)
-		.get();
-	const count = row?.cnt ?? 0;
+		.all();
+	const amazonCount = sourced.find((s) => s.source === 'amazon_email')?.cnt ?? 0;
+	const trackingCount = sourced.find((s) => s.source === 'tracking_email')?.cnt ?? 0;
+	const count = amazonCount + trackingCount;
 	if (count === 0) return null;
 
-	const run = db
-		.prepare<[], { id: number; started_at: string }>(
-			`SELECT id, started_at FROM import_runs
-			  WHERE source = 'amazon_email'
-			  ORDER BY started_at DESC LIMIT 1`
-		)
-		.get();
+	// Pick the review URL for the source with the larger backlog so the
+	// digest's primary CTA points to wherever there's more work. Falls back
+	// to the imports landing page when both have rows so admin can pick.
+	const baseUrl = getBaseUrl();
+	let primarySource: 'amazon_email' | 'tracking_email' | null = null;
+	if (amazonCount > 0 && trackingCount === 0) primarySource = 'amazon_email';
+	else if (trackingCount > 0 && amazonCount === 0) primarySource = 'tracking_email';
+	else if (amazonCount >= trackingCount) primarySource = 'amazon_email';
+	else primarySource = 'tracking_email';
 
-	const reviewUrl = run
-		? `${getBaseUrl()}/admin/imports/amazon/review?run=${run.id}`
-		: `${getBaseUrl()}/admin/imports/amazon`;
+	const run = primarySource
+		? db
+				.prepare<[string], { id: number; started_at: string }>(
+					`SELECT id, started_at FROM import_runs WHERE source = ? ORDER BY started_at DESC LIMIT 1`
+				)
+				.get(primarySource)
+		: undefined;
+
+	const reviewUrl =
+		run && primarySource === 'amazon_email'
+			? `${baseUrl}/admin/imports/amazon/review?run=${run.id}`
+			: run && primarySource === 'tracking_email'
+				? `${baseUrl}/admin/imports/tracking/review?run=${run.id}`
+				: `${baseUrl}/admin/imports`;
 
 	return {
 		count,
 		latestRunId: run?.id ?? null,
 		latestRunStartedAt: run?.started_at ?? null,
-		reviewUrl
+		reviewUrl,
+		amazonCount,
+		trackingCount
 	};
 }
 

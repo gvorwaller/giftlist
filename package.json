@@ -9,6 +9,8 @@
     "preview": "vite preview --port 5175",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "format": "prettier --write .",
     "lint": "prettier --check . && eslint .",
     "seed": "tsx scripts/seed-users.ts"
@@ -35,7 +37,8 @@
     "tsx": "^4.21.0",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^4.1.5"
   },
   "dependencies": {
     "argon2": "^0.44.0",

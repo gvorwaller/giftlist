@@ -1,6 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { getAuditFilterOptions, listAuditLog } from '$server/audit';
+import { getDb } from '$server/db';
 
 const PAGE_SIZE = 50;
 
@@ -42,6 +43,24 @@ export const load: PageServerLoad = ({ locals, url }) => {
 	const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 	const filters = getAuditFilterOptions();
 
+	// Map import-entity rows to their run source so the link can route to
+	// the correct review page (Amazon vs Tracking). td-61017c source-aware
+	// fan-out fix.
+	const importEntityIds = rows
+		.filter((r) => r.entity_type === 'import' && r.entity_id > 0)
+		.map((r) => r.entity_id);
+	const importSources: Record<number, string> = {};
+	if (importEntityIds.length > 0) {
+		const db = getDb();
+		const placeholders = importEntityIds.map(() => '?').join(',');
+		const sources = db
+			.prepare<number[], { id: number; source: string }>(
+				`SELECT id, source FROM import_runs WHERE id IN (${placeholders})`
+			)
+			.all(...importEntityIds);
+		for (const s of sources) importSources[s.id] = s.source;
+	}
+
 	return {
 		rows,
 		total,
@@ -49,6 +68,7 @@ export const load: PageServerLoad = ({ locals, url }) => {
 		totalPages,
 		pageSize: PAGE_SIZE,
 		filters,
+		importSources,
 		applied: { actorUserId, entityType, action, q, since, until }
 	};
 };

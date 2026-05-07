@@ -4,6 +4,10 @@ import { runAmazonScan, runProcessedCleanup } from './jobs/amazon-import';
 import { runChristmasKickoffJob } from './jobs/christmas-kickoff';
 import { runBackupJob } from './jobs/backup';
 import { runTrackingRefresh } from './jobs/tracking-refresh';
+import {
+	runTrackingImportScan,
+	runTrackingProcessedCleanup
+} from './jobs/tracking-import';
 import { getDb } from './db';
 
 /**
@@ -22,8 +26,10 @@ let started = false;
 const DEFAULTS = {
 	reminders: '0 8 * * *', // 08:00 daily
 	amazonScan: '30 7 * * *', // 07:30 daily, before reminders so the digest sees fresh pending counts
+	trackingEmailScan: '35 7 * * *', // 07:35 daily — between amazon scan and tracking-status refresh
 	trackingRefresh: '45 7 * * *', // 07:45 daily — right after the Amazon scan, before reminders
 	cleanup: '15 3 * * 0', // 03:15 Sundays
+	trackingEmailCleanup: '25 3 * * 0', // 03:25 Sundays — same window as Amazon cleanup
 	christmasKickoff: '0 8 1 9 *', // Sept 1 at 08:00 — wife's gift-shopping kickoff
 	backup: '0 2 * * *' // 02:00 daily — quiet hours, before any other job runs
 };
@@ -113,6 +119,40 @@ export function startScheduler(): void {
 		}
 	});
 	console.log(`[scheduler] registered amazon.cleanup_processed (${cleanupCron})`);
+
+	const trackingEmailScanCron = expr('TRACKING_EMAIL_SCAN_CRON', DEFAULTS.trackingEmailScan);
+	cron.schedule(trackingEmailScanCron, async () => {
+		const userId = getAdminUserId();
+		if (!userId) {
+			console.warn('[cron] tracking_email.scan skipped — no admin user');
+			return;
+		}
+		console.log('[cron] tracking_email.scan firing');
+		try {
+			await runTrackingImportScan(userId);
+		} catch (err) {
+			console.error('[cron] tracking_email.scan failed:', err);
+		}
+	});
+	console.log(`[scheduler] registered tracking_email.scan (${trackingEmailScanCron})`);
+
+	const trackingEmailCleanupCron = expr(
+		'TRACKING_EMAIL_CLEANUP_CRON',
+		DEFAULTS.trackingEmailCleanup
+	);
+	cron.schedule(trackingEmailCleanupCron, async () => {
+		const userId = getAdminUserId();
+		if (!userId) return;
+		console.log('[cron] tracking_email.cleanup_processed firing');
+		try {
+			await runTrackingProcessedCleanup(userId);
+		} catch (err) {
+			console.error('[cron] tracking_email.cleanup_processed failed:', err);
+		}
+	});
+	console.log(
+		`[scheduler] registered tracking_email.cleanup_processed (${trackingEmailCleanupCron})`
+	);
 
 	const backupCron = expr('BACKUP_CRON', DEFAULTS.backup);
 	cron.schedule(backupCron, async () => {

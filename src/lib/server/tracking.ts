@@ -96,6 +96,17 @@ async function shippoFetch<T>(
 }
 
 /**
+ * Per-gift in-flight registration map. Concurrent callers (admin double-click,
+ * import-accept racing /app/gifts/[id] Refresh, scheduler running while admin
+ * uses the UI) share a single inflight promise per gift, so Shippo only ever
+ * sees one POST /tracks/ per (carrier, tracking_number) tuple. Without this
+ * each caller could pass the early-return check and both POST, double-billing
+ * $0.01 and producing duplicate webhooks. Single-process (CLAUDE.md) makes a
+ * Map sufficient — no Redis/lock required. Codex P1 fix.
+ */
+const inflightRegistrations = new Map<number, Promise<string | null>>();
+
+/**
  * Register a gift's tracking number with Shippo so we'll receive webhook
  * updates when the carrier reports new checkpoints. Idempotent at Shippo's
  * end — POST /tracks/ with the same (carrier, tracking_number) returns the
@@ -105,8 +116,23 @@ async function shippoFetch<T>(
  *   - SHIPPO_API_KEY isn't configured
  *   - the gift has no tracking_number
  *   - the gift is already registered (tracking_provider_id set)
+ *
+ * Concurrent calls for the same gift ID share a single in-flight promise.
  */
 export async function registerWithProvider(
+	giftId: number,
+	actorUserId: number
+): Promise<string | null> {
+	const existing = inflightRegistrations.get(giftId);
+	if (existing) return existing;
+	const work = doRegisterWithProvider(giftId, actorUserId).finally(() => {
+		inflightRegistrations.delete(giftId);
+	});
+	inflightRegistrations.set(giftId, work);
+	return work;
+}
+
+async function doRegisterWithProvider(
 	giftId: number,
 	actorUserId: number
 ): Promise<string | null> {

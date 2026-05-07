@@ -14,8 +14,16 @@
 				return `/admin/people/${id}`;
 			case 'gift':
 				return `/app/gifts/${id}`;
-			case 'import':
-				return `/admin/imports/amazon/review?run=${id}`;
+			case 'import': {
+				// Route by the run's source so audit links land on the matching
+				// review page (Amazon vs Tracking). Falls back to the imports
+				// landing for batch operations (entity_id=0) or unknown sources.
+				if (id <= 0) return '/admin/imports';
+				const source = data.importSources?.[id];
+				if (source === 'tracking_email') return `/admin/imports/tracking/review?run=${id}`;
+				if (source === 'amazon_email') return `/admin/imports/amazon/review?run=${id}`;
+				return '/admin/imports';
+			}
 			default:
 				return null;
 		}
