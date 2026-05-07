@@ -37,12 +37,23 @@ export interface TodayData {
 }
 
 /**
- * A person drops off the Today list once their gift is physically in hand —
- * delivered, wrapped, or given. While the gift is still planned/ordered/
- * shipped (in-flight), the person stays surfaced so the manager keeps them
- * in mind. td-9a7c2e.
+ * A person drops off the Today list only once the gift is fully closed
+ * out — handed to the recipient ('given') or abandoned ('returned'). The
+ * lifecycle is idea → planned → ordered → shipped → delivered → wrapped
+ * → given; everything before 'given' still needs the manager's attention
+ * (delivered=arrived at home, wrapped=ready to give). td-9a7c2e.
  */
-const HANDLED_STATUSES = new Set(['delivered', 'wrapped', 'given']);
+const HANDLED_STATUSES = new Set(['given', 'returned']);
+
+/** Open = anywhere in the lifecycle that needs manager follow-through.
+ * Excludes 'idea' (just brainstorming) and the two terminal states. */
+export const OPEN_GIFT_STATUSES: readonly string[] = [
+	'planned',
+	'ordered',
+	'shipped',
+	'delivered',
+	'wrapped'
+];
 
 type OccasionJoin = PersonOccasion &
 	Occasion & { po_id: number; o_id: number; display_name: string; person_id: number };
@@ -145,25 +156,32 @@ export function loadTodayData(userId: number): TodayData {
 		.slice(0, 5);
 
 	const db = getDb();
-	// td-9a7c2e: surface every non-delivered gift, not just ones in transit.
-	// People whose occasion is past the 60-day cutoff (so they don't appear
-	// in `comingUp`) but who still have an active gift need to remain
-	// visible somewhere on Today. Status priority: shipped > ordered >
-	// planned so the most-actionable items rise.
+	// td-9a7c2e: surface every gift that hasn't yet been given. People
+	// whose occasion is past the 60-day cutoff still need to stay visible
+	// somewhere on Today as long as their gift is open. Status priority:
+	// wrapped > delivered > shipped > ordered > planned — most-actionable
+	// (closest to "give it!") rises to the top.
+	const openStatuses = [...OPEN_GIFT_STATUSES];
 	const packagesOnTheWay = db
-		.prepare<[], Gift>(
+		.prepare<string[], Gift>(
 			`SELECT g.* FROM gifts g
 			   JOIN people p ON p.id = g.person_id
 			  WHERE g.is_archived = 0
-			    AND g.status IN ('planned', 'ordered', 'shipped')
+			    AND g.status IN (${openStatuses.map(() => '?').join(',')})
 			    AND p.is_archived = 0
 			    AND p.is_self = 0
 			  ORDER BY
-			    CASE g.status WHEN 'shipped' THEN 1 WHEN 'ordered' THEN 2 ELSE 3 END,
+			    CASE g.status
+			      WHEN 'wrapped' THEN 1
+			      WHEN 'delivered' THEN 2
+			      WHEN 'shipped' THEN 3
+			      WHEN 'ordered' THEN 4
+			      ELSE 5
+			    END,
 			    COALESCE(g.shipped_at, g.ordered_at, g.created_at) DESC
 			  LIMIT 20`
 		)
-		.all();
+		.all(...openStatuses);
 
 	// Filter recently_viewed so self-people don't leak back into Today's
 	// recent-history strip. Per-user scoping (td-68804e): hide every self

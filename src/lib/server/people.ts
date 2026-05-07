@@ -83,11 +83,13 @@ export function listPeople(opts: ListPeopleOptions = {}): PersonWithContext[] {
 	const where = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
 	const people = db.prepare<typeof params, Person>(`SELECT * FROM people p ${where}`).all(...params);
 
-	// Pull "has in-flight gift" in one query rather than N+1.
+	// Pull "has in-flight gift" in one query rather than N+1. Open =
+	// anywhere in the lifecycle except 'idea' and the two terminal states
+	// (given, returned). Mirrors today.ts OPEN_GIFT_STATUSES.
 	const inFlightStmt = db.prepare<[], { person_id: number }>(
 		`SELECT DISTINCT person_id FROM gifts
 		  WHERE is_archived = 0
-		    AND status IN ('planned', 'ordered', 'shipped')`
+		    AND status IN ('planned', 'ordered', 'shipped', 'delivered', 'wrapped')`
 	);
 	const inFlightSet = new Set(inFlightStmt.all().map((r) => r.person_id));
 
@@ -203,7 +205,7 @@ export function getPersonWithContext(id: number): PersonDetail | undefined {
 		.prepare<[number], { cnt: number }>(
 			`SELECT COUNT(*) AS cnt FROM gifts
 			  WHERE person_id = ? AND is_archived = 0
-			    AND status IN ('planned', 'ordered', 'shipped')`
+			    AND status IN ('planned', 'ordered', 'shipped', 'delivered', 'wrapped')`
 		)
 		.get(id);
 	return {

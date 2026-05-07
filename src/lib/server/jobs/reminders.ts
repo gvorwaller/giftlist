@@ -48,10 +48,11 @@ export interface ReminderSummary {
 	notifiedSubject: string;
 }
 
-// "Handled" for digest purposes = the gift is physically in hand. While it's
-// still in-flight (planned/ordered/shipped) the recipient stays in the digest
-// so reminders don't fall silent before the package arrives. td-9a7c2e.
-const HANDLED_STATUSES: ReadonlySet<string> = new Set(['delivered', 'wrapped', 'given']);
+// "Handled" for digest purposes = the gift is closed out — handed over
+// (given) or abandoned (returned). Anything earlier in the lifecycle —
+// planned/ordered/shipped/delivered/wrapped — keeps the person in the
+// digest so we don't fall silent before they actually receive it. td-9a7c2e.
+const HANDLED_STATUSES: ReadonlySet<string> = new Set(['given', 'returned']);
 
 function getConfiguredLeadDays(): number {
 	const fromEnv = Number(process.env.REMINDER_LEAD_DAYS);
