@@ -2,6 +2,7 @@ import { getDb } from '../db';
 import { runJob, type JobResult } from './runner';
 import { deliverNotification, type ChannelResult } from '../notify';
 import { nextOccurrenceDate } from '../occasions';
+import { loadSkipSet, skipKey } from '../occasion-skips';
 import type { Gift, Occasion, Person, PersonOccasion } from '../types';
 
 export const JOB_NAME = 'reminders.daily';
@@ -47,14 +48,10 @@ export interface ReminderSummary {
 	notifiedSubject: string;
 }
 
-const HANDLED_STATUSES: ReadonlySet<string> = new Set([
-	'planned',
-	'ordered',
-	'shipped',
-	'delivered',
-	'wrapped',
-	'given'
-]);
+// "Handled" for digest purposes = the gift is physically in hand. While it's
+// still in-flight (planned/ordered/shipped) the recipient stays in the digest
+// so reminders don't fall silent before the package arrives. td-9a7c2e.
+const HANDLED_STATUSES: ReadonlySet<string> = new Set(['delivered', 'wrapped', 'given']);
 
 function getConfiguredLeadDays(): number {
 	const fromEnv = Number(process.env.REMINDER_LEAD_DAYS);
@@ -147,6 +144,9 @@ function collectUpcoming(leadDays: number): UpcomingItem[] {
 
 	const today = new Date();
 	const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+	// td-927a2d: skipped iterations are dropped from the digest the same way
+	// they're dropped from /app/today.
+	const skips = loadSkipSet();
 	// Per-occasion override: each occasion can extend the global lead time
 	// via occasions.reminder_days. We use max(globalLead, perOccasionLead)
 	// so an occasion never collapses below the global default but can
@@ -181,6 +181,7 @@ function collectUpcoming(leadDays: number): UpcomingItem[] {
 		};
 		const next = nextOccurrenceDate(occasion, todayStart);
 		if (!next) continue;
+		if (skips.has(skipKey(r.po_id, next.getFullYear()))) continue;
 		const effectiveLead = Math.max(leadDays, occasion.reminder_days || 0);
 		const cutoff = todayStart.getTime() + effectiveLead * 86_400_000;
 		if (next.getTime() > cutoff) continue;

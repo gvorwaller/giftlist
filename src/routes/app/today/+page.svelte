@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import type { PageData } from './$types';
 	import { managerLabel } from '$lib/gift-status';
 
@@ -7,6 +8,19 @@
 	}
 
 	let { data }: Props = $props();
+
+	// Skip flash: when the URL has ?undo=<po>:<year> we just skipped an
+	// iteration; render an inline Undo so the user can recover one tap away.
+	const undoToken = $derived($page.url.searchParams.get('undo'));
+	const undoParts = $derived(() => {
+		if (!undoToken) return null;
+		const [poStr, yearStr] = undoToken.split(':');
+		const po = Number(poStr);
+		const year = Number(yearStr);
+		if (!Number.isInteger(po) || !Number.isInteger(year)) return null;
+		return { po, year };
+	});
+	const justUnskipped = $derived($page.url.searchParams.get('unskipped') === '1');
 
 	function daysUntilLabel(days: number): string {
 		if (days === 0) return 'today';
@@ -69,6 +83,22 @@
 		</section>
 	{/if}
 
+	{#if undoParts()}
+		{@const u = undoParts()!}
+		<div class="flash" role="status">
+			<span>Skipped this iteration.</span>
+			<form method="POST" action="?/unskip" class="inline-form">
+				<input type="hidden" name="person_occasion_id" value={u.po} />
+				<input type="hidden" name="occasion_year" value={u.year} />
+				<button type="submit" class="link">Undo</button>
+			</form>
+		</div>
+	{:else if justUnskipped}
+		<div class="flash" role="status">
+			<span>Restored.</span>
+		</div>
+	{/if}
+
 	{#if data.nextBestAction}
 		{@const a = data.nextBestAction}
 		<section class="card hero">
@@ -78,6 +108,11 @@
 			<div class="row">
 				<a href="/app/gifts/new?person={a.personId}" class="primary">Add a gift for {a.personDisplayName}</a>
 				<a href="/app/people/{a.personId}" class="ghost">See {a.personDisplayName}</a>
+				<form method="POST" action="?/skip" class="skip-form">
+					<input type="hidden" name="person_occasion_id" value={a.personOccasionId} />
+					<input type="hidden" name="occasion_year" value={a.occasionYear} />
+					<button type="submit" class="ghost danger">Skip {a.occasionYear}</button>
+				</form>
 			</div>
 		</section>
 	{/if}
@@ -95,7 +130,7 @@
 			<p class="eyebrow">Coming up soon</p>
 			<ul class="occ-list">
 				{#each data.comingUp as o (o.personOccasionId)}
-					<li>
+					<li class="occ-li">
 						<a href="/app/people/{o.personId}" class="occ-row">
 							<div class="occ-main">
 								<p class="name">{o.personDisplayName}</p>
@@ -105,6 +140,11 @@
 								<span class="pill done">Gift handled</span>
 							{/if}
 						</a>
+						<form method="POST" action="?/skip" class="skip-form-inline">
+							<input type="hidden" name="person_occasion_id" value={o.personOccasionId} />
+							<input type="hidden" name="occasion_year" value={o.occasionYear} />
+							<button type="submit" class="link-skip" title="Skip this year">Skip</button>
+						</form>
 					</li>
 				{/each}
 			</ul>
@@ -146,6 +186,27 @@
 							{r.label}
 						</a>
 						<span class="meta">· {r.entity_type}</span>
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+
+	{#if data.skippedThisYear.length > 0}
+		<section class="card skipped-card">
+			<p class="eyebrow">Skipped this year ({data.skippedThisYear.length})</p>
+			<ul class="skipped-list">
+				{#each data.skippedThisYear as s (`${s.person_occasion_id}:${s.occasion_year}`)}
+					<li class="skipped-row">
+						<div class="skipped-main">
+							<p class="name">{s.person_display_name}</p>
+							<p class="meta">{s.occasion_title} {s.occasion_year}</p>
+						</div>
+						<form method="POST" action="?/unskip" class="skip-form-inline">
+							<input type="hidden" name="person_occasion_id" value={s.person_occasion_id} />
+							<input type="hidden" name="occasion_year" value={s.occasion_year} />
+							<button type="submit" class="link-skip">Restore</button>
+						</form>
 					</li>
 				{/each}
 			</ul>
@@ -345,5 +406,102 @@
 	.recent-list .meta {
 		text-transform: capitalize;
 		display: inline;
+	}
+
+	.flash {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		padding: 12px 16px;
+		margin-bottom: 12px;
+		border-radius: var(--radius-control);
+		background: var(--green-soft);
+		border: 1px solid var(--green);
+		color: var(--green);
+		font-family: var(--font-sans);
+		font-size: 14px;
+	}
+
+	.inline-form {
+		display: inline;
+	}
+
+	.link {
+		background: transparent;
+		border: none;
+		color: var(--green);
+		font-family: var(--font-sans);
+		font-size: 14px;
+		font-weight: 700;
+		text-decoration: underline;
+		cursor: pointer;
+		padding: 4px 8px;
+	}
+
+	.skip-form {
+		margin: 0;
+	}
+
+	.ghost.danger {
+		color: var(--rose);
+		border-color: var(--rose);
+	}
+
+	.occ-li {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.occ-li .occ-row {
+		flex: 1 1 auto;
+	}
+
+	.skip-form-inline {
+		flex: 0 0 auto;
+	}
+
+	.link-skip {
+		background: transparent;
+		border: 1px solid var(--line);
+		color: var(--muted);
+		font-family: var(--font-sans);
+		font-size: 12px;
+		font-weight: 600;
+		padding: 6px 10px;
+		border-radius: var(--radius-pill);
+		cursor: pointer;
+		min-height: 32px;
+	}
+	.link-skip:hover {
+		color: var(--rose);
+		border-color: var(--rose);
+	}
+
+	.skipped-card {
+		background: var(--bg);
+	}
+
+	.skipped-list {
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.skipped-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		padding: 10px 12px;
+		background: var(--paper);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+	}
+
+	.skipped-row .name {
+		font-size: 16px;
 	}
 </style>

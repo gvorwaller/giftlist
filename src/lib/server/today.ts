@@ -1,6 +1,7 @@
 import { getDb } from './db';
 import { nextOccurrenceDate } from './occasions';
 import { getFreshDraft } from './drafts';
+import { listSkipsWithContext, loadSkipSet, skipKey, type SkipWithContext } from './occasion-skips';
 import type {
 	Draft,
 	Gift,
@@ -30,10 +31,18 @@ export interface TodayData {
 	packagesOnTheWay: Gift[];
 	recentlyViewed: RecentlyViewed[];
 	resumeDraft: Draft | null;
+	/** Active skips for the current year — surfaced in a "Skipped" footer
+	 * so user can recover an iteration they skipped earlier. td-927a2d. */
+	skippedThisYear: SkipWithContext[];
 }
 
-/** Any gift not still an idea — "handled" means we've committed to it. */
-const HANDLED_STATUSES = new Set(['planned', 'ordered', 'shipped', 'delivered', 'wrapped', 'given']);
+/**
+ * A person drops off the Today list once their gift is physically in hand —
+ * delivered, wrapped, or given. While the gift is still planned/ordered/
+ * shipped (in-flight), the person stays surfaced so the manager keeps them
+ * in mind. td-9a7c2e.
+ */
+const HANDLED_STATUSES = new Set(['delivered', 'wrapped', 'given']);
 
 type OccasionJoin = PersonOccasion &
 	Occasion & { po_id: number; o_id: number; display_name: string; person_id: number };
@@ -53,6 +62,11 @@ function loadUpcomingWindow(daysAhead: number): UpcomingOccasion[] {
 			  WHERE po.is_active = 1`
 		)
 		.all();
+
+	// td-927a2d: drop iterations the user has explicitly skipped for the
+	// computed occurrence year. Filter is per-(person_occasion_id, year), so
+	// next year's birthday is unaffected by this year's skip.
+	const skips = loadSkipSet();
 
 	const now = new Date();
 	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -75,10 +89,12 @@ function loadUpcomingWindow(daysAhead: number): UpcomingOccasion[] {
 		};
 		const next = nextOccurrenceDate(occasion, today);
 		if (!next || next.getTime() > cutoff) continue;
+		const occurrenceYear = next.getFullYear();
+		if (skips.has(skipKey(r.po_id, occurrenceYear))) continue;
 		const daysUntil = Math.round((next.getTime() - today.getTime()) / 86_400_000);
 		const turnsAge =
 			(occasion.kind === 'birthday' || occasion.kind === 'anniversary') && occasion.year != null
-				? next.getFullYear() - occasion.year
+				? occurrenceYear - occasion.year
 				: null;
 		out.push({
 			personOccasionId: r.po_id,
@@ -89,7 +105,7 @@ function loadUpcomingWindow(daysAhead: number): UpcomingOccasion[] {
 			occasionKind: r.kind,
 			occurrence: next,
 			daysUntil,
-			occasionYear: next.getFullYear(),
+			occasionYear: occurrenceYear,
 			turnsAge,
 			hasHandledGift: false
 		});
@@ -167,12 +183,15 @@ export function loadTodayData(userId: number): TodayData {
 		)
 		.all(userId, userId, userId, 3);
 
+	const skippedThisYear = listSkipsWithContext(userId, new Date().getFullYear());
+
 	return {
 		nextBestAction,
 		comingUp,
 		packagesOnTheWay,
 		recentlyViewed,
-		resumeDraft: getFreshDraft(userId, 'gift') ?? null
+		resumeDraft: getFreshDraft(userId, 'gift') ?? null,
+		skippedThisYear
 	};
 }
 
