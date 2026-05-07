@@ -153,7 +153,7 @@
 
 	{#if data.packagesOnTheWay.length > 0}
 		<section class="card">
-			<p class="eyebrow">Packages on the way</p>
+			<p class="eyebrow">Open gifts</p>
 			<ul class="pkg-list">
 				{#each data.packagesOnTheWay as g (g.id)}
 					<li>

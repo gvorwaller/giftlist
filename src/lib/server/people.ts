@@ -29,6 +29,11 @@ export interface NextOccasion {
 export interface PersonWithContext extends Person {
 	nextOccasion: NextOccasion | null;
 	lastGift: Gift | null;
+	/** Has any non-archived gift in {planned, ordered, shipped} —
+	 * "in flight, not yet delivered". Used to lift the person up the
+	 * People list sort so admin/manager can find them quickly even
+	 * when their next occasion is far out. td-9a7c2e follow-up. */
+	hasInFlightGift: boolean;
 }
 
 export interface GiftWithOccasion extends Gift {
@@ -78,16 +83,33 @@ export function listPeople(opts: ListPeopleOptions = {}): PersonWithContext[] {
 	const where = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
 	const people = db.prepare<typeof params, Person>(`SELECT * FROM people p ${where}`).all(...params);
 
-	// Enrich each person with next occasion + last gift.
+	// Pull "has in-flight gift" in one query rather than N+1.
+	const inFlightStmt = db.prepare<[], { person_id: number }>(
+		`SELECT DISTINCT person_id FROM gifts
+		  WHERE is_archived = 0
+		    AND status IN ('planned', 'ordered', 'shipped')`
+	);
+	const inFlightSet = new Set(inFlightStmt.all().map((r) => r.person_id));
+
+	// Enrich each person with next occasion + last gift + in-flight flag.
 	const enriched = people.map((p) => ({
 		...p,
 		nextOccasion: computeNextOccasionForPerson(p.id),
-		lastGift: computeLastGiftForPerson(p.id)
+		lastGift: computeLastGiftForPerson(p.id),
+		hasInFlightGift: inFlightSet.has(p.id)
 	}));
 
 	if (sort === 'upcoming') {
-		// Ascending by daysUntil; null next-occasion goes last.
+		// Tiered sort:
+		//   1. People with in-flight gifts come first (active manager focus)
+		//   2. Then by next-occasion daysUntil ascending; null goes last
+		//   3. Tiebreaker: last name
+		// This keeps Kate / Benjamin visible up top when their birthday has
+		// just passed but a gift is still in flight (td-9a7c2e follow-up).
 		enriched.sort((a, b) => {
+			if (a.hasInFlightGift !== b.hasInFlightGift) {
+				return a.hasInFlightGift ? -1 : 1;
+			}
 			const ad = a.nextOccasion?.daysUntil ?? Number.POSITIVE_INFINITY;
 			const bd = b.nextOccasion?.daysUntil ?? Number.POSITIVE_INFINITY;
 			if (ad !== bd) return ad - bd;
@@ -176,10 +198,19 @@ export function isPersonVisibleToUser(personId: number, userId: number): boolean
 export function getPersonWithContext(id: number): PersonDetail | undefined {
 	const person = getPersonById(id);
 	if (!person) return undefined;
+	const db = getDb();
+	const inFlight = db
+		.prepare<[number], { cnt: number }>(
+			`SELECT COUNT(*) AS cnt FROM gifts
+			  WHERE person_id = ? AND is_archived = 0
+			    AND status IN ('planned', 'ordered', 'shipped')`
+		)
+		.get(id);
 	return {
 		...person,
 		nextOccasion: computeNextOccasionForPerson(person.id),
 		lastGift: computeLastGiftForPerson(person.id),
+		hasInFlightGift: (inFlight?.cnt ?? 0) > 0,
 		gifts: listGiftsForPerson(person.id)
 	};
 }

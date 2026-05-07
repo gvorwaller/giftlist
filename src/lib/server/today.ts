@@ -145,15 +145,23 @@ export function loadTodayData(userId: number): TodayData {
 		.slice(0, 5);
 
 	const db = getDb();
+	// td-9a7c2e: surface every non-delivered gift, not just ones in transit.
+	// People whose occasion is past the 60-day cutoff (so they don't appear
+	// in `comingUp`) but who still have an active gift need to remain
+	// visible somewhere on Today. Status priority: shipped > ordered >
+	// planned so the most-actionable items rise.
 	const packagesOnTheWay = db
 		.prepare<[], Gift>(
 			`SELECT g.* FROM gifts g
 			   JOIN people p ON p.id = g.person_id
 			  WHERE g.is_archived = 0
-			    AND g.status IN ('ordered', 'shipped')
+			    AND g.status IN ('planned', 'ordered', 'shipped')
+			    AND p.is_archived = 0
 			    AND p.is_self = 0
-			  ORDER BY COALESCE(g.shipped_at, g.ordered_at, g.created_at) DESC
-			  LIMIT 5`
+			  ORDER BY
+			    CASE g.status WHEN 'shipped' THEN 1 WHEN 'ordered' THEN 2 ELSE 3 END,
+			    COALESCE(g.shipped_at, g.ordered_at, g.created_at) DESC
+			  LIMIT 20`
 		)
 		.all();
 
