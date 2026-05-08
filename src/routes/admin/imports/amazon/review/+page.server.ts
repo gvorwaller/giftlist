@@ -20,7 +20,16 @@ export const load: PageServerLoad = ({ locals, url }) => {
 	if (!run) throw error(404, 'No import runs yet. Run a scan first.');
 
 	const rows = listRowsForRun(run.id);
-	const people = listPeople({ sort: 'alphabetical' });
+	// Include self-people scoped to the current admin so they can assign an
+	// imported Amazon row to "Gaylon — me" (private package). Per-user
+	// scoping (td-68804e) — admin sees their own self-row only, never the
+	// manager's. Without includeSelf, the default filter hides all is_self=1
+	// people and the dropdown silently omits them.
+	const people = listPeople({
+		sort: 'alphabetical',
+		includeSelf: true,
+		selfOwnerUserId: locals.user.id
+	});
 
 	// Sort rows for the UI: pending first (by received desc), then accepted, skipped, failed.
 	const priority: Record<string, number> = { pending: 0, accepted: 1, failed: 2, skipped: 3 };

@@ -9,6 +9,7 @@ import {
 import { parseAmazonEmail } from '../amazon-parser';
 import { matchRecipient, saveAlias } from '../name-matcher';
 import { logAudit } from '../audit';
+import { isPersonVisibleToUser } from '../people';
 import { createGift, getGiftById, updateGift } from '../gifts';
 import { ensureVendor } from '../vendors';
 import { transitionGift, canTransition } from './../gift-status';
@@ -348,6 +349,22 @@ export async function commitReviewedRows(
 					row.match_person_id,
 					row.match_confidence,
 					'No recipient assigned',
+					row.id
+				);
+				result.rowsFailed += 1;
+				continue;
+			}
+
+			// Per-user privacy guard (td-68804e parity): even though /admin is
+			// admin-only, defense-in-depth — a crafted POST shouldn't be able
+			// to assign an Amazon row to a self-person owned by another user.
+			if (!isPersonVisibleToUser(personId, userId)) {
+				updateRow.run(
+					'failed',
+					row.gift_id,
+					row.match_person_id,
+					row.match_confidence,
+					'Recipient not visible to you (archived or another user\'s self-person).',
 					row.id
 				);
 				result.rowsFailed += 1;
