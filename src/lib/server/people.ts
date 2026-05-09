@@ -41,7 +41,12 @@ export interface GiftWithOccasion extends Gift {
 }
 
 export interface PersonDetail extends PersonWithContext {
+	/** Non-archived gifts. Active + given + returned (per existing contract). */
 	gifts: GiftWithOccasion[];
+	/** Archived gifts, surfaced under a "Past gifts" section so admin can
+	 * find them, restore via the gift detail page, or skim year-over-year
+	 * for ideas. td-efe0ef. */
+	archivedGifts: GiftWithOccasion[];
 }
 
 export interface ListPeopleOptions {
@@ -208,23 +213,36 @@ export function getPersonWithContext(id: number): PersonDetail | undefined {
 			    AND status IN ('planned', 'ordered', 'shipped', 'delivered', 'wrapped')`
 		)
 		.get(id);
+	const allGifts = listGiftsForPerson(person.id, { includeArchived: true });
 	return {
 		...person,
 		nextOccasion: computeNextOccasionForPerson(person.id),
 		lastGift: computeLastGiftForPerson(person.id),
 		hasInFlightGift: (inFlight?.cnt ?? 0) > 0,
-		gifts: listGiftsForPerson(person.id)
+		gifts: allGifts.filter((g) => g.is_archived === 0),
+		archivedGifts: allGifts.filter((g) => g.is_archived === 1)
 	};
 }
 
-export function listGiftsForPerson(personId: number): GiftWithOccasion[] {
+export interface ListGiftsForPersonOptions {
+	/** When true, include is_archived=1 rows so the person view can render
+	 * a "Past gifts" history section (td-efe0ef). Default false to preserve
+	 * the existing manager-view contract. */
+	includeArchived?: boolean;
+}
+
+export function listGiftsForPerson(
+	personId: number,
+	opts: ListGiftsForPersonOptions = {}
+): GiftWithOccasion[] {
 	const db = getDb();
+	const archivedClause = opts.includeArchived ? '' : 'AND g.is_archived = 0';
 	return db
 		.prepare<[number], GiftWithOccasion>(
 			`SELECT g.*, o.title AS occasion_title
 			   FROM gifts g
 			   LEFT JOIN occasions o ON o.id = g.occasion_id
-			  WHERE g.person_id = ? AND g.is_archived = 0
+			  WHERE g.person_id = ? ${archivedClause}
 			  ORDER BY g.updated_at DESC`
 		)
 		.all(personId);

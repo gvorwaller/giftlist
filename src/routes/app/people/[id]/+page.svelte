@@ -68,9 +68,38 @@
 			.filter((g) => ACTIVE_STATUSES.includes(g.status))
 			.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status])
 	);
-	const pastGifts = $derived(
-		data.person.gifts.filter((g) => g.status === 'given' || g.status === 'returned')
-	);
+
+	// Past = given/returned (still in the active gift list) + everything
+	// archived. Grouped by occasion_year DESC so multi-year history clusters
+	// (e.g., scanning Christmas 2024/2023/2022 to avoid duplicating ideas).
+	// Falls back to created_at year when occasion_year is null. td-efe0ef.
+	function yearOf(g: { occasion_year: number | null; created_at: string }): number {
+		if (g.occasion_year) return g.occasion_year;
+		const d = new Date(g.created_at.replace(' ', 'T'));
+		return isNaN(d.getTime()) ? 0 : d.getFullYear();
+	}
+
+	const pastGroups = $derived(() => {
+		const completedActive = data.person.gifts.filter(
+			(g) => g.status === 'given' || g.status === 'returned'
+		);
+		const all = [...completedActive, ...data.person.archivedGifts];
+		const byYear = new Map<number, typeof all>();
+		for (const g of all) {
+			const y = yearOf(g);
+			if (!byYear.has(y)) byYear.set(y, []);
+			byYear.get(y)!.push(g);
+		}
+		const years = [...byYear.keys()].sort((a, b) => b - a);
+		return years.map((year) => ({
+			year,
+			gifts: byYear.get(year)!.sort((a, b) =>
+				(b.updated_at ?? '').localeCompare(a.updated_at ?? '')
+			)
+		}));
+	});
+	const pastTotal = $derived(pastGroups().reduce((n, g) => n + g.gifts.length, 0));
+	let pastExpanded = $state(false);
 </script>
 
 <svelte:head>
@@ -160,51 +189,78 @@
 		</section>
 	{/if}
 
-	{#if pastGifts.length > 0}
+	{#if pastTotal > 0}
 		<section class="card">
-			<p class="eyebrow">Given &amp; returned</p>
-			<ul class="gift-list">
-				{#each pastGifts as g (g.id)}
-					<li class="gift-row">
-						<a href="/app/gifts/{g.id}" class="gift-main">
-							<div class="gift-text">
-								<p class="gift-title">{g.title}</p>
-								<p class="gift-meta">
-									{#if g.occasion_title}
-										{g.occasion_title}{#if g.occasion_year} {g.occasion_year}{/if}
-									{/if}
-									{#if g.occasion_title && g.price_cents}
-										·
-									{/if}
-									{#if g.price_cents}{priceDollars(g.price_cents)}{/if}
-								</p>
-							</div>
-							<span class="pill pill-{badgeTone(g.status)}">{managerLabel(g.status)}</span>
-						</a>
-						<a
-							href="/app/gifts/{g.id}/edit"
-							class="gift-edit"
-							aria-label="Edit {g.title}"
-						>
-							<svg
-								width="20"
-								height="20"
-								viewBox="0 0 20 20"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="1.6"
-								aria-hidden="true"
-							>
-								<path
-									d="M14 2.5l3.5 3.5-9.5 9.5H4.5v-3.5l9.5-9.5z"
-									stroke-linejoin="round"
-									stroke-linecap="round"
-								/>
-							</svg>
-						</a>
-					</li>
+			<button
+				type="button"
+				class="past-toggle"
+				aria-expanded={pastExpanded}
+				onclick={() => {
+					pastExpanded = !pastExpanded;
+				}}
+			>
+				<span class="eyebrow">
+					Past gifts ({pastTotal})
+					<span class="caret" aria-hidden="true">{pastExpanded ? '▾' : '▸'}</span>
+				</span>
+				<span class="past-hint">
+					{pastExpanded ? 'Tap to collapse' : 'Given, returned, archived — by year'}
+				</span>
+			</button>
+			{#if pastExpanded}
+				{#each pastGroups() as group (group.year)}
+					<div class="year-group">
+						<p class="year-label">{group.year || '—'}</p>
+						<ul class="gift-list">
+							{#each group.gifts as g (g.id)}
+								<li class="gift-row" class:dim={g.is_archived === 1}>
+									<a href="/app/gifts/{g.id}" class="gift-main">
+										<div class="gift-text">
+											<p class="gift-title">{g.title}</p>
+											<p class="gift-meta">
+												{#if g.occasion_title}
+													{g.occasion_title}
+												{/if}
+												{#if g.occasion_title && g.price_cents}
+													·
+												{/if}
+												{#if g.price_cents}{priceDollars(g.price_cents)}{/if}
+												{#if g.is_archived === 1}
+													<span class="archived-tag">· archived</span>
+												{/if}
+											</p>
+										</div>
+										<span class="pill pill-{badgeTone(g.status)}">
+											{managerLabel(g.status)}
+										</span>
+									</a>
+									<a
+										href="/app/gifts/{g.id}/edit"
+										class="gift-edit"
+										aria-label="Edit {g.title}"
+									>
+										<svg
+											width="20"
+											height="20"
+											viewBox="0 0 20 20"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="1.6"
+											aria-hidden="true"
+										>
+											<path
+												d="M14 2.5l3.5 3.5-9.5 9.5H4.5v-3.5l9.5-9.5z"
+												stroke-linejoin="round"
+												stroke-linecap="round"
+											/>
+										</svg>
+									</a>
+								</li>
+							{/each}
+						</ul>
+					</div>
 				{/each}
-			</ul>
+			{/if}
 		</section>
 	{/if}
 
@@ -476,5 +532,59 @@
 	.pill-danger {
 		background: #fde9e6;
 		color: var(--rose);
+	}
+
+	.past-toggle {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		width: 100%;
+		text-align: left;
+		background: transparent;
+		border: none;
+		cursor: pointer;
+		padding: 0;
+		min-height: var(--tap-target);
+	}
+
+	.past-toggle .caret {
+		font-size: 12px;
+		color: var(--muted);
+		margin-left: 4px;
+	}
+
+	.past-hint {
+		font-family: var(--font-sans);
+		font-size: 12px;
+		color: var(--muted);
+		font-style: italic;
+	}
+
+	.year-group {
+		margin-top: 14px;
+	}
+
+	.year-group:first-of-type {
+		margin-top: 12px;
+	}
+
+	.year-label {
+		font-family: var(--font-sans);
+		font-size: 13px;
+		font-weight: 700;
+		letter-spacing: 0.05em;
+		color: var(--ink);
+		margin-bottom: 6px;
+		padding-bottom: 4px;
+		border-bottom: 1px dashed var(--line);
+	}
+
+	.gift-row.dim {
+		opacity: 0.7;
+	}
+
+	.archived-tag {
+		font-style: italic;
+		color: var(--muted);
 	}
 </style>
