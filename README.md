@@ -12,12 +12,28 @@ Live at **<https://gifts.gaylon.photos>**.
 - **SvelteKit 2** (TypeScript, adapter-node), runes-mode
 - **better-sqlite3** with WAL — single-process, single-writer
 - **argon2id** password hashing, server-side sessions, `SameSite=Lax` cookies
-- **Google OAuth2** (Gmail + People API) for Contacts import and Amazon email parsing
+- **Google OAuth2** (Gmail + People API) for Contacts import and email-driven gift / package import
+- **Shippo** tracking API for carrier registration + webhook checkpoints (URL-token auth, pay-as-you-go ~$0.01/registration)
 - **node-cron** in-process scheduler (env-guarded; only runs when `NODE_ENV=production AND ENABLE_CRON=true`)
 - **PM2** for process management on a shared DigitalOcean droplet behind Nginx + Cloudflare (Flexible SSL)
 - **Telegram + nodemailer** for daily digest delivery
+- **Vitest** for unit tests (parsers + helpers)
 
 Accessibility is a core constraint, not a polish item — Lighthouse 100/100/100/98 against `/login` in prod.
+
+## What it does
+
+- Gift lifecycle: `idea → planned → ordered → shipped → delivered → wrapped → given` (with `returned` as a branch)
+- Per-recipient occasions (birthdays, anniversaries, custom annual + one-time) with reminder lead-times
+- Skip-this-year per-iteration with reversible Undo (no archiving the link)
+- Gift history per person, grouped by year — scan past Christmases to avoid duplicates
+- Daily reminder digest via Telegram + email, including pending-import counts
+- **Two email-import pipelines** (admin gates every commit):
+  - **Amazon**: `Giftlist/Amazon/Inbox` → parses Amazon order/shipped/delivered emails → recipient match → gift create/advance
+  - **Tracking**: `Giftlist/Tracking/Inbox` → parses non-Amazon shipment confirmations (UPS / USPS / FedEx / DHL / OnTrac / Lasership / Canada Post) → either links to existing gift or creates a self-package with Shippo registration
+- Personal (non-gift) packages — `is_self` people scoped per-owner so manager and admin only see their own
+- Soft-delete with reachable Restore button + visible archived gifts under "Past gifts" history
+- Today list keeps people surfaced until the gift is *given* (not just delivered) so wrapped-but-not-handed-over stays visible
 
 ## Local development
 
@@ -35,6 +51,7 @@ npm run dev                # http://localhost:5175
 | `npm run dev` | Vite dev server on **port 5175** (5173/4 are taken by other projects) |
 | `npm run build` | Production build via adapter-node |
 | `npm run check` | Type-check + svelte-check (0 errors / 0 warnings baseline) |
+| `npm test` | Vitest run (parser + helper unit tests) |
 | `npm run seed` | Idempotent admin + manager upsert from `.env` |
 
 ## Deploy
@@ -78,14 +95,20 @@ CCC pre-flight runs this before uploading the directory to the NAS.
 
 | Concern | File |
 |---|---|
-| Schema | `migrations/*.sql` |
+| Schema | `migrations/*.sql` (currently at v15) |
+| Migration runner (FK choreography) | `src/lib/server/migrate.ts` |
 | Type definitions | `src/lib/server/types.ts` |
 | Auth | `src/lib/server/{auth,session}.ts` |
-| Job orchestration | `src/lib/server/jobs/{runner,reminders,amazon-import,christmas-kickoff}.ts` |
+| Job orchestration | `src/lib/server/jobs/{runner,reminders,amazon-import,tracking-import,tracking-refresh,christmas-kickoff,backup}.ts` |
+| Email parsers | `src/lib/server/{amazon-parser,shipment-parser}.ts` |
+| Tracking provider integration | `src/lib/server/tracking.ts` (+ webhook at `/api/tracking/shippo`) |
+| Gmail reader | `src/lib/server/gmail-reader.ts` |
 | Notification channels | `src/lib/server/{notify,notify-email,notify-telegram}.ts` |
 | Cron scheduler | `src/lib/server/scheduler.ts` |
 | Audit log | `src/lib/server/audit.ts`, `/admin/audit` |
 | Occasion management | `src/lib/server/occasions.ts`, `/admin/occasions` |
+| Skip-iteration | `src/lib/server/occasion-skips.ts` |
+| Privacy guards | `src/lib/server/people.ts` (`isPersonVisibleToUser`, `getOrCreateSelfPerson`) |
 | PM2 config | `ecosystem.config.cjs` |
 | Backup script | `scripts/backup-sqlite.sh` |
 | Deploy script | `scripts/deploy-to-DO.sh` |
@@ -107,7 +130,11 @@ When docs disagree, the higher-numbered version wins.
 - **PM2 reboot survival** — `pm2 startup systemd` + `pm2 save` already done; processes restart automatically
 - **Logs**: `/var/log/pm2/giftlist-{out,error}.log`
 - **Cron jobs** (env-tunable; defaults below):
-  - `reminders.daily` — `0 8 * * *`
-  - `amazon.scan` — `30 7 * * *` (before reminders so the digest sees fresh pending counts)
-  - `amazon.cleanup_processed` — `15 3 * * 0`
+  - `backup.sqlite` — `0 2 * * *` (02:00 daily, before any other job)
+  - `amazon.scan` — `30 7 * * *` (07:30, before reminders so the digest sees fresh pending counts)
+  - `tracking_email.scan` — `35 7 * * *` (07:35, between Amazon scan and tracking refresh)
+  - `tracking.refresh` — `45 7 * * *` (07:45 — pulls Shippo status for in-flight gifts)
+  - `reminders.daily` — `0 8 * * *` (08:00)
+  - `amazon.cleanup_processed` — `15 3 * * 0` (03:15 Sundays — trash messages older than 180 days)
+  - `tracking_email.cleanup_processed` — `25 3 * * 0` (03:25 Sundays)
   - `christmas.kickoff` — `0 8 1 9 *` (Sept 1 — gift-shopping kickoff)

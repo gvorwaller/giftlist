@@ -14,11 +14,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Mobile-first gift tracking web app with two roles: a gift manager (primary user) and an admin. Tracks gift purchases, shipments, and upcoming gift-giving occasions. Built with SvelteKit (TypeScript, adapter-node), SQLite (via better-sqlite3 thin wrapper), hosted on a shared DigitalOcean droplet behind Nginx + Cloudflare.
+Mobile-first gift tracking web app with two roles: a gift manager (primary user) and an admin. Tracks gift purchases, shipments, and upcoming gift-giving occasions. Built with SvelteKit (TypeScript, adapter-node), SQLite (via better-sqlite3 thin wrapper), hosted on a shared DigitalOcean droplet behind Nginx + Cloudflare. Live at <https://gifts.gaylon.photos>.
 
 **Accessibility is a core design constraint, not a nice-to-have.** See design spec Section 11 for detailed guidelines.
 
-Implementation follows the 6-phase plan in `docs/gift-tracker-implementation-plan-Codex.md`.
+The original 6-phase plan in `docs/gift-tracker-implementation-plan-Codex.md` is largely shipped (phases 1-6 complete; ongoing work tracked in `td` and `docs/devlog/YYYY-MM-DD.md`). Schema currently at v15.
 
 ## Commands
 
@@ -32,6 +32,9 @@ node build/index.js
 
 # Type checking + Svelte diagnostics (0 warnings baseline — fix any new warnings)
 npm run check
+
+# Run unit tests (Vitest — parsers, helpers)
+npm test
 
 # Deploy to production (ALWAYS use this — never manual SSH + build)
 ./scripts/deploy-to-DO.sh
@@ -65,44 +68,57 @@ cc-status --lines 20                         # last 20 entries
 - **Sessions** — cookie-based with argon2id password hashing.
 
 ### Data Layer
-SQLite database with WAL mode enabled at startup. Schema creation order per implementation plan Section 5:
-1. `users` — two accounts, admin + manager roles
-2. `people` — gift recipients (called "recipients" in design doc)
-3. `events` — occasions (birthdays, holidays, etc.)
-4. `gifts` — core entity with full status lifecycle
-5. `drafts` — server-side draft persistence for unfinished gift entries
-6. `audit_log` — human-readable log of all mutations
-7. `job_runs` — background job execution records
-8. `app_state` — app-level config/state
+SQLite (WAL, single-writer). Migrations live in `migrations/NNN-name.sql` and run at boot via `src/lib/server/migrate.ts`. The runner toggles `PRAGMA foreign_keys = OFF` before each migration's transaction and runs `PRAGMA foreign_key_check` after commit, so migrations needing the SQLite recreate-table pattern (e.g. 014, 015) are safe.
 
-Deferred tables (Phase 6+): `import_runs`, `import_rows`, `aliases`, `external_tokens`
+Current schema (v15) — tables grouped by domain:
+
+- **Identity**: `users`, `sessions`, `external_tokens` (encrypted Google OAuth)
+- **Recipients**: `people` (with `is_self` + `owner_user_id` for per-user privacy on personal packages), `person_aliases`
+- **Occasions**: `occasions`, `person_occasions`, `occasion_skips` (per-iteration skips, td-927a2d)
+- **Gifts**: `gifts` (full lifecycle), `vendors`, `shippers` (USPS / UPS / FedEx / Other / DHL / OnTrac / Lasership), `shipment_events`
+- **Drafts / history**: `drafts`, `recently_viewed`
+- **Imports**: `import_runs` (`source` ∈ {`amazon_email`, `tracking_email`}), `import_rows` (`email_type` includes `tracking_only`)
+- **Ops**: `audit_log`, `job_runs`, `app_state`
 
 ### Route Structure
 ```
 /login
-/app/today              — manager home (dashboard)
-/app/people             — recipient list
-/app/people/[id]        — recipient detail + gift history
-/app/gifts/new          — add gift form
-/app/gifts/[id]         — gift detail + status actions
+/app/today              — manager home (dashboard) — Today + Open gifts + Skipped + Recently viewed
+/app/people             — recipient list (in-flight gift owners surfaced first)
+/app/people/[id]        — recipient detail + active gifts + Past-gifts history (year-grouped)
+/app/packages           — all in-flight gifts incl. self-packages (per-user scoped)
+/app/gifts/new          — add gift form (?person= prefill supported)
+/app/gifts/[id]         — gift detail + status actions + Restore (when archived)
+/app/gifts/[id]/edit    — gift edit form
 
-/admin                  — admin control center
-/admin/people           — recipient CRUD
-/admin/people/[id]      — recipient edit + occasion management
-/admin/imports          — CSV import (Phase 6)
-/admin/settings         — notification config
-/admin/audit            — activity log
-/admin/system           — backup status, job history
+/admin                                       — admin control center
+/admin/people, /admin/people/[id], /new      — recipient CRUD + self-person + owner picker
+/admin/occasions                             — shared/custom occasion CRUD
+/admin/vendors, /admin/shippers              — lookup CRUD (with archive)
+/admin/imports                               — landing page (Google Contacts + Amazon + Tracking tiles)
+/admin/imports/contacts                      — Google Contacts import (birthday-filtered)
+/admin/imports/amazon, /amazon/review        — Amazon email scan + commit review
+/admin/imports/tracking, /tracking/review    — non-Amazon shipment-email scan + commit review (td-61017c)
+/admin/settings                              — Google OAuth + notification + backup config
+/admin/audit                                 — paginated audit log with source-aware import links
+/admin/system                                — backup status, job history, manual triggers
+
+/api/tracking/shippo                         — Shippo webhook (URL-token auth)
+/healthz                                     — liveness + schema_version
 ```
 
-Route policy: manager cannot see `/admin/*`. Admin can see both `/app/*` and `/admin/*`.
+Route policy: manager cannot reach `/admin/*` (enforced by `src/routes/admin/+layout.server.ts`). Admin can see both `/app/*` and `/admin/*`. Admin can preview-as-manager via `?previewAsManager=1`.
 
 ### Key Patterns
-- **Status lifecycle**: `idea` -> `planned` -> `ordered` -> `shipped` -> `delivered` -> `wrapped` -> `given` (with `returned` as branch from post-`ordered`)
-- **Status mutations are button-driven**, not dropdown edits — fewer invalid transitions, cleaner audit trail
-- **Draft handling**: server-side `drafts` table, not browser-only localStorage — survives device switches and refreshes
-- **Audit logging**: every create, update, archive, and status transition writes a human-readable record
-- **Soft deletes only**: no permanent deletes in the manager view — admin can recover
+- **Status lifecycle**: `idea` → `planned` → `ordered` → `shipped` → `delivered` → `wrapped` → `given` (with `returned` as branch from post-`ordered`).
+- **Today list "stay until given"** (td-9a7c2e): a person stays on `/app/today` until the gift is *given* (or `returned`). Wrapped gifts sitting on the closet shelf still need attention. Open-gift filter = `{planned, ordered, shipped, delivered, wrapped}`; HANDLED = `{given, returned}` only.
+- **Skip iteration** (td-927a2d): `occasion_skips (po_id, year)` PK. "No row" = "not skipped" so undo is a delete. Filtered out of today + reminders via a single Set lookup.
+- **Per-user self-package privacy** (td-68804e): `people.is_self` + `people.owner_user_id` strict-equality filter; `isPersonVisibleToUser(personId, userId)` is the canonical guard for any POST that accepts a person_id from the form.
+- **Status mutations are button-driven**, not dropdown edits — fewer invalid transitions, cleaner audit trail.
+- **Draft handling**: server-side `drafts` table, not browser-only localStorage — survives device switches and refreshes.
+- **Audit logging**: every create, update, archive, status transition, scan, and import-commit writes a human-readable record. `entityType: 'import'` rows link source-aware to `/admin/imports/{amazon,tracking}/review`.
+- **Soft deletes only**: no permanent deletes in the manager view; archive toggles `is_archived`. Past-gifts section on `/app/people/[id]` surfaces archived rows so admin can navigate in and Restore via the gift detail page.
+- **Shippo registration mutex**: `tracking.ts` keeps a per-process `Map<giftId, Promise>` so concurrent calls (admin double-click, importer racing manual refresh) share one POST instead of double-billing $0.01.
 
 ## CSS Rules
 
@@ -134,7 +150,27 @@ The visual direction is warm, domestic, and calm — not clinical. Reference: `d
 ## Environment Variables
 
 Required in `.env`:
-- `DATABASE_PATH` — path to SQLite database file
-- `AUTH_SECRET` — session cookie signing secret
-- Notification config (Phase 4): SMTP credentials or Resend API key, Telegram bot token + chat ID
-- Backup config (Phase 4): `SPACES_KEY`, `SPACES_SECRET`, `SPACES_BUCKET`, `SPACES_REGION`, `SPACES_ENDPOINT`
+- `DATABASE_PATH` — path to SQLite database file (defaults to `./data/gifttracker.db`)
+- `AUTH_SECRET` — session cookie signing secret + AES-GCM key for encrypted external_tokens
+- `BASE_URL` — public URL for outbound digest links (defaults to `http://localhost:5175` in dev)
+- `ADMIN_PASSWORD`, `MANAGER_PASSWORD` — used by `npm run seed` only
+
+OAuth (Google) — set up via `/admin/settings`:
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
+
+Tracking (Shippo):
+- `SHIPPO_API_KEY` — live or test key
+- `SHIPPO_WEBHOOK_SECRET` — URL-token validated against `?token=` on the webhook route
+
+Notifications:
+- SMTP credentials (host, port, user, pass) or Resend API key
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+
+Backup:
+- `SPACES_KEY`, `SPACES_SECRET`, `SPACES_BUCKET`, `SPACES_REGION`, `SPACES_ENDPOINT`
+
+Cron tunables (any/all optional, defaults in `src/lib/server/scheduler.ts`):
+- `REMINDER_CRON`, `AMAZON_SCAN_CRON`, `TRACKING_REFRESH_CRON`, `AMAZON_CLEANUP_CRON`, `TRACKING_EMAIL_SCAN_CRON`, `TRACKING_EMAIL_CLEANUP_CRON`, `BACKUP_CRON`, `CHRISTMAS_KICKOFF_CRON`
+- `ENABLE_CRON=true` — required (along with `NODE_ENV=production`) for the scheduler to register at boot
+
+`REMINDER_LEAD_DAYS` — global default lead time (21d) for the reminder digest. Per-occasion override via `occasions.reminder_days`.
