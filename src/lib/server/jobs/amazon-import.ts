@@ -157,7 +157,10 @@ export async function runAmazonScan(
 					const parse = parseAmazonEmail(res.value);
 					parsed += 1;
 
-					const match = matchRecipient(parse.recipientName);
+					const recipientMatch = matchRecipient(parse.recipientName);
+					const match = recipientMatch.personId
+						? recipientMatch
+						: applyOrderIdFallback(recipientMatch, parse.orderId);
 					const candidatesJson = JSON.stringify(match.candidates);
 					const disposition = defaultDisposition(parse.emailType);
 
@@ -246,6 +249,53 @@ function defaultDisposition(emailType: EmailType): ImportRowDisposition {
 	// doesn't drown the admin. Order-lifecycle emails stay pending for review.
 	if (emailType === 'marketing' || emailType === 'review_request') return 'skipped';
 	return 'pending';
+}
+
+/**
+ * Order# is the strongest signal we have when Amazon's emails strip recipient
+ * (every shipped/delivered email these days). If the parsed order_id matches an
+ * existing gift, take that gift's person as authoritative — the commit-time
+ * resolveOrCreateGift will then link to the existing gift instead of creating
+ * a duplicate.
+ */
+function findGiftPersonByOrderId(orderId: string | null): {
+	personId: number;
+	personDisplayName: string;
+	giftId: number;
+} | null {
+	if (!orderId) return null;
+	const db = getDb();
+	const hit = db
+		.prepare<[string], { id: number; person_id: number; display_name: string }>(
+			`SELECT g.id, g.person_id, p.display_name
+			   FROM gifts g
+			   JOIN people p ON p.id = g.person_id
+			  WHERE g.order_id = ? AND g.is_archived = 0
+			  ORDER BY g.id DESC LIMIT 1`
+		)
+		.get(orderId);
+	if (!hit) return null;
+	return { personId: hit.person_id, personDisplayName: hit.display_name, giftId: hit.id };
+}
+
+function applyOrderIdFallback(
+	recipientMatch: ReturnType<typeof matchRecipient>,
+	orderId: string | null
+): ReturnType<typeof matchRecipient> {
+	const hit = findGiftPersonByOrderId(orderId);
+	if (!hit) return recipientMatch;
+	return {
+		personId: hit.personId,
+		confidence: 'exact',
+		candidates: [
+			{
+				personId: hit.personId,
+				displayName: hit.personDisplayName,
+				confidence: 'exact'
+			},
+			...recipientMatch.candidates
+		]
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -501,6 +551,63 @@ function lifecycleStatus(t: EmailType): GiftStatus | null {
 	if (t === 'shipped') return 'shipped';
 	if (t === 'delivered') return 'delivered';
 	return null;
+}
+
+// ---------------------------------------------------------------------------
+// Per-run retry: re-evaluate failed rows by parsed_order_id.
+// After a fresh scan staged a row as failed (typically "No recipient assigned"
+// because the recipient name didn't auto-match), the admin may have manually
+// created or edited a gift with the matching order_id. This action lets the
+// admin re-run the order# lookup against just this run's failed rows; any hit
+// is promoted disposition='pending' with match_person_id prefilled, ready for
+// the normal accept flow.
+
+export interface RetryResult {
+	scanned: number;
+	matched: number;
+}
+
+export function retryFailedByOrderId(runId: number, actorUserId: number): RetryResult {
+	const db = getDb();
+	const rows = db
+		.prepare<[number], ImportRow>(
+			`SELECT * FROM import_rows
+			  WHERE import_run_id = ?
+			    AND disposition = 'failed'
+			    AND parsed_order_id IS NOT NULL
+			    AND parsed_order_id != ''`
+		)
+		.all(runId);
+
+	const updateRow = db.prepare(
+		`UPDATE import_rows
+		    SET disposition = 'pending',
+		        match_person_id = ?,
+		        match_confidence = 'exact',
+		        error_message = NULL,
+		        updated_at = CURRENT_TIMESTAMP
+		  WHERE id = ?`
+	);
+
+	let matched = 0;
+	for (const row of rows) {
+		const hit = findGiftPersonByOrderId(row.parsed_order_id);
+		if (!hit) continue;
+		updateRow.run(hit.personId, row.id);
+		matched += 1;
+	}
+
+	if (matched > 0) {
+		logAudit({
+			actorUserId,
+			entityType: 'import',
+			entityId: runId,
+			action: 'amazon_retry_order_id',
+			summary: `Re-matched ${matched} of ${rows.length} failed rows to existing gifts via order #`
+		});
+	}
+
+	return { scanned: rows.length, matched };
 }
 
 // ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@ import {
 	getLatestRun,
 	getRun,
 	listRowsForRun,
+	retryFailedByOrderId,
 	type CommitRowInput
 } from '$server/jobs/amazon-import';
 import { matchGiftByTitle, type GiftMatchResult } from '$server/gift-matcher';
@@ -123,6 +124,23 @@ export const actions: Actions = {
 			303,
 			`/admin/imports/amazon/review?run=${runId}&skipped=${result.rowsSkipped}`
 		);
+	},
+
+	// Re-evaluate this run's failed rows by parsed_order_id. If admin has since
+	// created or edited a gift whose order_id matches, promote the row to
+	// pending with the gift's person prefilled. Bulk equivalent of "did I miss
+	// any after I created the package manually?".
+	retryFailedByOrder: async ({ locals, request }) => {
+		if (!locals.user) throw redirect(303, '/login');
+		const fd = await request.formData();
+		const runId = Number(fd.get('run_id'));
+		if (!Number.isFinite(runId)) return fail(400, { error: 'Missing run id.' });
+		const result = retryFailedByOrderId(runId, locals.user.id);
+		const qs = new URLSearchParams();
+		qs.set('run', String(runId));
+		qs.set('retried', String(result.scanned));
+		qs.set('rematched', String(result.matched));
+		throw redirect(303, `/admin/imports/amazon/review?${qs.toString()}`);
 	},
 
 	// Re-process a previously failed or skipped row with a manually chosen recipient.

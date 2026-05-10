@@ -45,6 +45,12 @@
 	const flashFailed = $derived(Number($page.url.searchParams.get('failed') ?? '0'));
 	const flashMoveFails = $derived(Number($page.url.searchParams.get('move_failures') ?? '0'));
 	const flashReassigned = $derived(Number($page.url.searchParams.get('reassigned') ?? '0'));
+	const flashRetried = $derived(Number($page.url.searchParams.get('retried') ?? '0'));
+	const flashRematched = $derived(Number($page.url.searchParams.get('rematched') ?? '0'));
+
+	const failedWithOrder = $derived(
+		data.rows.filter((r) => r.disposition === 'failed' && r.parsed_order_id)
+	);
 </script>
 
 <svelte:head>
@@ -77,6 +83,15 @@
 	{:else if flashReassigned > 0}
 		<div class="flash ok" role="status">
 			Row reassigned and gift created.
+		</div>
+	{:else if flashRetried > 0}
+		<div class="flash ok" role="status">
+			{#if flashRematched > 0}
+				{flashRematched} of {flashRetried} failed row{flashRetried === 1 ? '' : 's'} re-matched
+				to existing gifts by order # — moved back to pending for review.
+			{:else}
+				Re-checked {flashRetried} failed row{flashRetried === 1 ? '' : 's'} but no order # matches found.
+			{/if}
 		</div>
 	{:else if flashFailed > 0}
 		<div class="flash err" role="alert">
@@ -282,7 +297,17 @@
 
 	{#if handled.length > 0}
 		<section class="card">
-			<p class="eyebrow">Already handled in this run ({handled.length})</p>
+			<div class="handled-header">
+				<p class="eyebrow">Already handled in this run ({handled.length})</p>
+				{#if failedWithOrder.length > 0}
+					<form method="POST" action="?/retryFailedByOrder" class="retry-form">
+						<input type="hidden" name="run_id" value={data.run.id} />
+						<button type="submit" class="ghost small" title="Re-check failed rows against existing gifts by order #">
+							Retry {failedWithOrder.length} failed by order #
+						</button>
+					</form>
+				{/if}
+			</div>
 			<ul class="handled-list">
 				{#each handled.slice(0, 20) as r (r.id)}
 					{@const reassignable = r.disposition === 'failed' || r.disposition === 'skipped'}
@@ -670,6 +695,21 @@
 		text-transform: uppercase;
 		color: var(--green);
 		margin-bottom: 10px;
+	}
+
+	.handled-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin-bottom: 10px;
+	}
+	.handled-header .eyebrow { margin-bottom: 0; }
+	.retry-form { margin: 0; }
+	.ghost.small {
+		min-height: 36px;
+		padding: 6px 14px;
+		font-size: 13px;
 	}
 
 	.handled-list {
