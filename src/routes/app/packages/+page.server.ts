@@ -11,24 +11,38 @@ export const load: PageServerLoad = ({ locals }) => {
 	// Scope self-orders to the signed-in user (td-68804e). Non-self gifts
 	// (shared recipients) are visible to everyone; self-people belong to a
 	// specific owner_user_id and only that user sees them on their packages.
+	// td-ea004e: include delivered + wrapped so self-packages don't drop off
+	// after the Amazon "delivered" email lands — admin still needs to ack
+	// wrap + give from this surface (Today hides self-people).
 	const db = getDb();
 	const raw = db
 		.prepare<[number], Gift>(
 			`SELECT g.* FROM gifts g
 			   JOIN people p ON p.id = g.person_id
 			  WHERE g.is_archived = 0
-			    AND g.status IN ('ordered', 'shipped')
+			    AND g.status IN ('ordered', 'shipped', 'delivered', 'wrapped')
 			    AND (p.is_self = 0 OR p.owner_user_id = ?)
 			  ORDER BY COALESCE(g.shipped_at, g.created_at) DESC`
 		)
 		.all(locals.user.id);
 
-	const inFlight = raw.map((g) => ({
+	const enriched = raw.map((g) => ({
 		...g,
 		person_display_name: personForGift(g.person_id)?.display_name ?? '(archived)'
 	}));
 
-	return { inFlight, trackingProviderConfigured: isTrackingProviderConfigured() };
+	const onTheWay = enriched.filter(
+		(g) => g.status === 'ordered' || g.status === 'shipped'
+	);
+	const waitingToGive = enriched.filter(
+		(g) => g.status === 'delivered' || g.status === 'wrapped'
+	);
+
+	return {
+		onTheWay,
+		waitingToGive,
+		trackingProviderConfigured: isTrackingProviderConfigured()
+	};
 };
 
 export const actions: Actions = {

@@ -9,7 +9,11 @@
 
 	let { data, form }: Props = $props();
 
-	function trackingLabel(g: (typeof data.inFlight)[number]): string | null {
+	type PackageRow = (typeof data.onTheWay)[number];
+
+	let totalCount = $derived(data.onTheWay.length + data.waitingToGive.length);
+
+	function trackingLabel(g: PackageRow): string | null {
 		if (!g.tracking_number && !g.carrier) return null;
 		const bits: string[] = [];
 		if (g.carrier) bits.push(g.carrier);
@@ -17,7 +21,7 @@
 		return bits.join(' · ');
 	}
 
-	function carrierStatus(g: (typeof data.inFlight)[number]): string | null {
+	function carrierStatus(g: PackageRow): string | null {
 		if (!g.tracking_status) return null;
 		return g.tracking_status;
 	}
@@ -32,11 +36,11 @@
 		<p class="eyebrow">In flight</p>
 		<h1>Packages on the way</h1>
 		<p class="subtitle">
-			Bought, not yet delivered. Tap a row for status, or the pencil to edit.
+			Bought, not yet given. Tap a row for status, or the pencil to edit.
 		</p>
 		<div class="actions-row">
 			<a href="/app/gifts/new" class="primary small">Add a package</a>
-			{#if data.trackingProviderConfigured && data.inFlight.length > 0}
+			{#if data.trackingProviderConfigured && data.onTheWay.length > 0}
 				<form method="POST" action="?/refreshAll" class="refresh-row">
 					<button type="submit" class="ghost small">Refresh all tracking</button>
 				</form>
@@ -52,7 +56,7 @@
 		{/if}
 	</header>
 
-	{#if data.inFlight.length === 0}
+	{#if totalCount === 0}
 		<section class="card empty">
 			<p>Nothing on its way right now.</p>
 			<p class="empty-hint">
@@ -60,46 +64,97 @@
 			</p>
 		</section>
 	{:else}
-		<ul class="list">
-			{#each data.inFlight as g (g.id)}
-				<li class="row-card">
-					<a href="/app/gifts/{g.id}" class="row-main">
-						<div class="row-text">
-							<p class="title">{g.title}</p>
-							<p class="meta">For {g.person_display_name}</p>
-							{#if trackingLabel(g)}
-								<p class="tracking">{trackingLabel(g)}</p>
-							{/if}
-							{#if carrierStatus(g)}
-								<p class="carrier-status">Carrier: {carrierStatus(g)}</p>
-							{/if}
-						</div>
-						<span class="pill attention">{managerLabel(g.status)}</span>
-					</a>
-					<a
-						href="/app/gifts/{g.id}/edit"
-						class="row-edit"
-						aria-label="Edit {g.title}"
-					>
-						<svg
-							width="20"
-							height="20"
-							viewBox="0 0 20 20"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="1.6"
-							aria-hidden="true"
-						>
-							<path
-								d="M14 2.5l3.5 3.5-9.5 9.5H4.5v-3.5l9.5-9.5z"
-								stroke-linejoin="round"
-								stroke-linecap="round"
-							/>
-						</svg>
-					</a>
-				</li>
-			{/each}
-		</ul>
+		{#if data.onTheWay.length > 0}
+			<section class="section">
+				<h2 class="section-heading">On the way</h2>
+				<ul class="list">
+					{#each data.onTheWay as g (g.id)}
+						<li class="row-card">
+							<a href="/app/gifts/{g.id}" class="row-main">
+								<div class="row-text">
+									<p class="title">{g.title}</p>
+									<p class="meta">For {g.person_display_name}</p>
+									{#if trackingLabel(g)}
+										<p class="tracking">{trackingLabel(g)}</p>
+									{/if}
+									{#if carrierStatus(g)}
+										<p class="carrier-status">Carrier: {carrierStatus(g)}</p>
+									{/if}
+								</div>
+								<span class="pill attention">{managerLabel(g.status)}</span>
+							</a>
+							<a
+								href="/app/gifts/{g.id}/edit"
+								class="row-edit"
+								aria-label="Edit {g.title}"
+							>
+								<svg
+									width="20"
+									height="20"
+									viewBox="0 0 20 20"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="1.6"
+									aria-hidden="true"
+								>
+									<path
+										d="M14 2.5l3.5 3.5-9.5 9.5H4.5v-3.5l9.5-9.5z"
+										stroke-linejoin="round"
+										stroke-linecap="round"
+									/>
+								</svg>
+							</a>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
+
+		{#if data.waitingToGive.length > 0}
+			<section class="section">
+				<h2 class="section-heading">Waiting to wrap &amp; give</h2>
+				<ul class="list">
+					{#each data.waitingToGive as g (g.id)}
+						<li class="row-card">
+							<a href="/app/gifts/{g.id}" class="row-main">
+								<div class="row-text">
+									<p class="title">{g.title}</p>
+									<p class="meta">For {g.person_display_name}</p>
+									{#if trackingLabel(g)}
+										<p class="tracking">{trackingLabel(g)}</p>
+									{/if}
+									{#if carrierStatus(g)}
+										<p class="carrier-status">Carrier: {carrierStatus(g)}</p>
+									{/if}
+								</div>
+								<span class="pill green">{managerLabel(g.status)}</span>
+							</a>
+							<a
+								href="/app/gifts/{g.id}/edit"
+								class="row-edit"
+								aria-label="Edit {g.title}"
+							>
+								<svg
+									width="20"
+									height="20"
+									viewBox="0 0 20 20"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="1.6"
+									aria-hidden="true"
+								>
+									<path
+										d="M14 2.5l3.5 3.5-9.5 9.5H4.5v-3.5l9.5-9.5z"
+										stroke-linejoin="round"
+										stroke-linecap="round"
+									/>
+								</svg>
+							</a>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
 	{/if}
 </main>
 
@@ -155,6 +210,24 @@
 	.empty-hint {
 		padding: 0 0 16px !important;
 		font-size: 14px !important;
+	}
+
+	.section {
+		margin-top: 18px;
+	}
+
+	.section:first-of-type {
+		margin-top: 8px;
+	}
+
+	.section-heading {
+		font-family: var(--font-sans);
+		font-size: 13px;
+		font-weight: 700;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--muted);
+		margin-bottom: 10px;
 	}
 
 	.list {
@@ -294,6 +367,11 @@
 	.pill.attention {
 		background: var(--amber-soft);
 		color: var(--amber);
+	}
+
+	.pill.green {
+		background: var(--green-soft);
+		color: var(--green);
 	}
 
 	.row-edit {
