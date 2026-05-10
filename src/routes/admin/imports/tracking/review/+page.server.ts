@@ -32,12 +32,29 @@ export const load: PageServerLoad = ({ locals, url }) => {
 	const giftLookup = db.prepare<[string], { id: number; title: string }>(
 		'SELECT id, title FROM gifts WHERE tracking_number = ? AND is_archived = 0 ORDER BY id ASC LIMIT 1'
 	);
-	const inferences: Record<number, { kind: 'link' | 'new'; giftId?: number; giftTitle?: string }> = {};
+	const inferences: Record<
+		number,
+		{ kind: 'link' | 'new' | 'new-no-tracking'; giftId?: number; giftTitle?: string }
+	> = {};
+	const giftByOrder = db.prepare<[string], { id: number; title: string }>(
+		'SELECT id, title FROM gifts WHERE order_id = ? AND is_archived = 0 ORDER BY id DESC LIMIT 1'
+	);
 	for (const r of rows) {
-		if (r.disposition !== 'pending' || !r.parsed_tracking_number) continue;
-		const hit = giftLookup.get(r.parsed_tracking_number);
-		if (hit) inferences[r.id] = { kind: 'link', giftId: hit.id, giftTitle: hit.title };
-		else inferences[r.id] = { kind: 'new' };
+		if (r.disposition !== 'pending') continue;
+		if (r.parsed_tracking_number) {
+			const hit = giftLookup.get(r.parsed_tracking_number);
+			if (hit) inferences[r.id] = { kind: 'link', giftId: hit.id, giftTitle: hit.title };
+			else inferences[r.id] = { kind: 'new' };
+			continue;
+		}
+		// td-c28c5e: order-confirmation rows have no tracking#. Show whether
+		// the order# already matches an existing gift (link) or will create
+		// a new status='ordered' self-package with no Shippo registration.
+		if (r.email_type === 'order_confirmation' && r.parsed_order_id) {
+			const hit = giftByOrder.get(r.parsed_order_id);
+			if (hit) inferences[r.id] = { kind: 'link', giftId: hit.id, giftTitle: hit.title };
+			else inferences[r.id] = { kind: 'new-no-tracking' };
+		}
 	}
 
 	// Sort: pending first (by received desc), then handled by category.

@@ -137,7 +137,10 @@ describe('parseShipmentEmail', () => {
 		expect(result.carrierSlug).toBe('canada_post');
 	});
 
-	it('Merchant promo email with 12-digit "Order #" from non-carrier → trackingNumber null', () => {
+	it('Merchant promo with strict "Order #…" but no tracking# → order_confirmation', () => {
+		// Side effect of the order_confirmation intent (td-c28c5e): emails
+		// containing the strict marker now stage as pending order_confirmation
+		// regardless of merchant intent. Admin Skip is the safety net.
 		const result = parseShipmentEmail(
 			msg({
 				subject: 'Save 20% on your next order',
@@ -147,7 +150,7 @@ describe('parseShipmentEmail', () => {
 		);
 		expect(result.trackingNumber).toBeNull();
 		expect(result.carrier).toBeNull();
-		// Still extracts orderId for review-UI display.
+		expect(result.emailType).toBe('order_confirmation');
 		expect(result.orderId).toBe('123456789012');
 	});
 
@@ -217,5 +220,77 @@ describe('parseShipmentEmail', () => {
 		);
 		expect(result.trackingNumber).toBeNull();
 		expect(result.carrier).toBeNull();
+		expect(result.emailType).toBe('tracking_only');
+	});
+
+	// ------------------------------------------------------------------
+	// td-c28c5e: order-confirmation intent
+
+	it('Transparent Labs "Order #3613899 confirmed" → order_confirmation', () => {
+		const result = parseShipmentEmail(
+			msg({
+				subject: 'Order #3613899 confirmed',
+				from: 'Transparent Labs <noreply@transparentlabs.com>',
+				bodyText: 'Thank you for your purchase! ORDER #3613899 — 1 item. Visit our store.'
+			})
+		);
+		expect(result.emailType).toBe('order_confirmation');
+		expect(result.trackingNumber).toBeNull();
+		expect(result.orderId).toBe('3613899');
+		expect(result.merchant).toBe('Transparent Labs');
+		expect(result.title).toBe('Order #3613899 confirmed');
+		expect(result.confidence).toBe('low');
+	});
+
+	it('Best Buy "Order Number BBY01-..." → order_confirmation', () => {
+		const result = parseShipmentEmail(
+			msg({
+				subject: 'Thanks for your Best Buy order',
+				from: 'BestBuyInfo@emailinfo.bestbuy.com',
+				bodyText: 'Order Number: BBY01-806783654321. We will email you when it ships.'
+			})
+		);
+		expect(result.emailType).toBe('order_confirmation');
+		expect(result.orderId).toBe('BBY01-806783654321');
+	});
+
+	it('UPS shipment with "Order #12345" in body → tracking_only (carrier wins)', () => {
+		const result = parseShipmentEmail(
+			msg({
+				subject: 'UPS shipment notification',
+				from: 'pkginfo@ups.com',
+				bodyText: 'Your Order #12345 has shipped. Tracking: 1Z999AA10123456784.'
+			})
+		);
+		expect(result.emailType).toBe('tracking_only');
+		expect(result.trackingNumber).toBe('1Z999AA10123456784');
+		expect(result.orderId).toBe('12345');
+	});
+
+	it('Marketing fluff "Order our newsletter" → no order match, falls through unknown', () => {
+		const result = parseShipmentEmail(
+			msg({
+				subject: 'Discover our newest flavors',
+				from: 'hello@brand.com',
+				bodyText: 'Order our latest snacks today and save big!'
+			})
+		);
+		// Strict detector requires a marker after "order"; "Order our" has none.
+		expect(result.emailType).toBe('tracking_only');
+		expect(result.trackingNumber).toBeNull();
+		expect(result.orderId).toBeNull();
+	});
+
+	it('Order-confirmation merchant extraction without display name → local-part fallback', () => {
+		const result = parseShipmentEmail(
+			msg({
+				subject: 'Your order',
+				from: 'orders@circupool.com',
+				bodyText: 'Thank you for your order. Order #: ABC-99887.'
+			})
+		);
+		expect(result.emailType).toBe('order_confirmation');
+		expect(result.merchant).toBe('orders');
+		expect(result.orderId).toBe('ABC-99887');
 	});
 });

@@ -114,7 +114,7 @@ export async function runTrackingImportScan(
 				   from_address, email_type, parsed_title, parsed_order_id,
 				   parsed_tracking_number, parsed_carrier, parsed_sender_domain,
 				   disposition, error_message
-				 ) VALUES (?, ?, ?, ?, ?, ?, 'tracking_only', ?, ?, ?, ?, ?, ?, ?)`
+				 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			);
 
 			let summaries;
@@ -196,7 +196,14 @@ export async function runTrackingImportScan(
 
 					let disposition: ImportRowDisposition;
 					let errorMessage: string | null;
-					if (!parse.trackingNumber) {
+					if (parse.emailType === 'order_confirmation') {
+						// td-c28c5e: merchant order email with strict "Order #…"
+						// marker. No tracking# yet — admin accepts to create a
+						// status='ordered' self-package; the eventual carrier email
+						// upgrades it via order_id match.
+						disposition = 'pending';
+						errorMessage = null;
+					} else if (!parse.trackingNumber) {
 						disposition = 'failed';
 						errorMessage = 'no tracking number detected';
 					} else if (isAmazonLogistics) {
@@ -223,6 +230,7 @@ export async function runTrackingImportScan(
 						s.subject,
 						s.receivedAt,
 						s.from,
+						parse.emailType,
 						parse.title,
 						parse.orderId,
 						parse.trackingNumber,
@@ -373,8 +381,13 @@ export async function commitTrackingReviewedRows(
 			continue;
 		}
 
-		// Accept path. Validate parsed fields.
-		if (!row.parsed_tracking_number) {
+		// Accept path. Dispatch by email_type: order_confirmation rows take a
+		// no-Shippo path that creates a status='ordered' self-package; everything
+		// else requires a parsed tracking# to proceed.
+		const isOrderConfirmation =
+			row.email_type === 'order_confirmation' && !!row.parsed_order_id;
+
+		if (!isOrderConfirmation && !row.parsed_tracking_number) {
 			updateRow.run(
 				'failed',
 				row.gift_id,
@@ -401,7 +414,9 @@ export async function commitTrackingReviewedRows(
 		}
 
 		try {
-			const outcome = await acceptTrackingRow(row, userId);
+			const outcome = isOrderConfirmation
+				? await acceptOrderConfirmationRow(row, userId)
+				: await acceptTrackingRow(row, userId);
 			updateRow.run('accepted', outcome.giftId, outcome.error, row.id);
 			if (outcome.error) {
 				// Outcome surfaced a soft failure (e.g., tracking-number mismatch
@@ -542,6 +557,81 @@ async function acceptTrackingRow(row: ImportRow, userId: number): Promise<Accept
 	);
 
 	await registerWithProvider(gift.id, userId);
+	return { giftId: gift.id, created: true, error: null };
+}
+
+/**
+ * td-c28c5e: accept path for merchant order-confirmation emails.
+ * No tracking# yet, so no Shippo registration. If an existing gift already
+ * has this order_id (and either no sender constraint applies or sender
+ * agrees), link to it instead of creating a duplicate. Otherwise create a
+ * self-package in status='ordered' that the eventual carrier shipment email
+ * will upgrade via the existing order_id-match path in acceptTrackingRow.
+ */
+async function acceptOrderConfirmationRow(row: ImportRow, userId: number): Promise<AcceptOutcome> {
+	const db = getDb();
+	const orderId = row.parsed_order_id!.trim();
+
+	// Look for an existing gift on this order_id. Use sender/vendor agreement
+	// when we have a sender domain (matches acceptTrackingRow's pattern).
+	// Without a sender domain, fall back to plain order_id match — the strict
+	// regex already filtered out most accidents and admin reviews each row.
+	let existing: Gift | undefined;
+	if (row.parsed_sender_domain) {
+		const sender = row.parsed_sender_domain;
+		existing = db
+			.prepare<[string, string, string], Gift>(
+				`SELECT g.*
+				   FROM gifts g
+				   LEFT JOIN vendors v ON v.id = g.vendor_id
+				  WHERE g.order_id = ? AND g.is_archived = 0
+				    AND (
+				      LOWER(v.name) = ?
+				      OR INSTR(LOWER(COALESCE(g.source_url, '')), ?) > 0
+				    )
+				  ORDER BY g.id DESC LIMIT 1`
+			)
+			.get(orderId, normalizeSenderForVendorMatch(sender), sender.toLowerCase());
+	}
+	if (!existing) {
+		existing = db
+			.prepare<[string], Gift>(
+				`SELECT * FROM gifts
+				  WHERE order_id = ? AND is_archived = 0
+				  ORDER BY id DESC LIMIT 1`
+			)
+			.get(orderId);
+	}
+
+	if (existing) {
+		// Already have a gift on this order#. No fields to patch (we have no
+		// tracking# / carrier / shipper to contribute), so just link.
+		return { giftId: existing.id, created: false, error: null };
+	}
+
+	// Create a status='ordered' self-package. No Shippo call — there's nothing
+	// to register yet. Title prefers the email subject; falls back to merchant
+	// or sender domain if subject is missing.
+	const selfPerson = getOrCreateSelfPerson(userId);
+	const title =
+		row.subject?.trim() || row.parsed_sender_domain || '(imported order)';
+	const gift = createGift(
+		{
+			person_id: selfPerson.id,
+			title,
+			vendor_id: null,
+			occasion_id: null,
+			occasion_year: new Date().getFullYear(),
+			order_id: orderId,
+			tracking_number: null,
+			carrier: null,
+			shipper_id: null,
+			price_cents: null,
+			status: 'ordered',
+			is_idea: false
+		},
+		userId
+	);
 	return { giftId: gift.id, created: true, error: null };
 }
 

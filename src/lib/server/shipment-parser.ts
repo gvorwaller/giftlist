@@ -15,7 +15,14 @@ import type { GmailMessageFull } from './gmail-reader';
 export type ShipmentCarrier = 'UPS' | 'USPS' | 'FedEx' | 'DHL' | 'Amazon' | 'OnTrac' | 'Lasership' | 'Canada Post';
 
 export interface ParsedShipment {
-	emailType: 'tracking_only';
+	/**
+	 * tracking_only — carrier shipment confirmation with a parsed tracking#.
+	 * order_confirmation — merchant order email with no tracking# but a strict
+	 *   "Order #…" / "Order number …" marker. Stages as pending so admin can
+	 *   create a status='ordered' self-package without Shippo registration;
+	 *   the eventual shipment email upgrades the gift via order_id match.
+	 */
+	emailType: 'tracking_only' | 'order_confirmation';
 	trackingNumber: string | null;
 	carrier: ShipmentCarrier | null;
 	/** Slug aligned with shippers.tracking_provider_slug for Shippo registration. */
@@ -24,6 +31,8 @@ export interface ParsedShipment {
 	orderId: string | null;
 	/** Sender domain (e.g. "ups.com"). Used for order_id-match constraint. */
 	senderDomain: string | null;
+	/** Display name from From: header, or local-part fallback. Used as title hint. */
+	merchant: string | null;
 	title: string | null;
 	confidence: 'high' | 'low';
 }
@@ -38,6 +47,40 @@ const CARRIER_TO_SLUG: Record<ShipmentCarrier, string> = {
 	Lasership: 'lasership',
 	'Canada Post': 'canada_post'
 };
+
+function extractMerchantFromFrom(from: string | null): string | null {
+	// "Transparent Labs <noreply@…>" → "Transparent Labs"
+	// "noreply@brand.com" → "noreply" (last-resort fallback)
+	if (!from) return null;
+	const trimmed = from.trim();
+	const displayMatch = trimmed.match(/^"?([^"<]+?)"?\s*<[^>]+>$/);
+	if (displayMatch && displayMatch[1].trim()) return displayMatch[1].trim();
+	const local = trimmed.match(/^([^@\s<]+)@/);
+	if (local) return local[1];
+	return null;
+}
+
+/**
+ * Strict order-confirmation detector. Requires an explicit marker (#, "number",
+ * "no", ":") between "order" and the captured value — looser than this would
+ * pull from prose like "Order our newsletter today".
+ *
+ * Returns the captured order# string, or null. Never returns a value that
+ * looks like a known carrier tracking#.
+ */
+function detectOrderConfirmationId(body: string, subject: string): string | null {
+	const haystack = `${subject}\n${body}`;
+	// Marker is required (#, "number", "no", or ":"); a trailing punctuation
+	// like "Order Number: BBY01-…" or "Order #: ABC-…" is also tolerated.
+	const re = /\border\s*(?:#|number|no\.?|:)\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{2,30})/gi;
+	for (const m of haystack.matchAll(re)) {
+		const candidate = m[1].trim();
+		if (/^1Z[A-Z0-9]{16}$/i.test(candidate)) continue;
+		if (/^TBA\d{12}$/i.test(candidate)) continue;
+		return candidate;
+	}
+	return null;
+}
 
 function extractSenderDomain(from: string | null): string | null {
 	if (!from) return null;
@@ -185,10 +228,11 @@ export function parseShipmentEmail(msg: GmailMessageFull): ParsedShipment {
 	const subject = (msg.subject ?? '').trim();
 	const body = msg.bodyText || '';
 	const senderDomain = extractSenderDomain(msg.from);
+	const merchant = extractMerchantFromFrom(msg.from);
 
 	const hit = detectTracking(body, subject, senderDomain);
 	const multi = hit ? detectMultipleTracking(body, subject, senderDomain) : false;
-	const orderId = extractOrderId(body);
+	const looseOrderId = extractOrderId(body);
 
 	const carrier = hit?.carrier ?? null;
 	const carrierSlug = carrier ? CARRIER_TO_SLUG[carrier] : null;
@@ -203,14 +247,47 @@ export function parseShipmentEmail(msg: GmailMessageFull): ParsedShipment {
 		if (multi) confidence = 'low';
 	}
 
+	if (hit) {
+		return {
+			emailType: 'tracking_only',
+			trackingNumber: hit.tracking,
+			carrier,
+			carrierSlug,
+			orderId: looseOrderId,
+			senderDomain,
+			merchant,
+			title: subject || null,
+			confidence
+		};
+	}
+
+	// No tracking#. Try order-confirmation intent with the strict detector.
+	const strictOrderId = detectOrderConfirmationId(body, subject);
+	if (strictOrderId) {
+		return {
+			emailType: 'order_confirmation',
+			trackingNumber: null,
+			carrier: null,
+			carrierSlug: null,
+			orderId: strictOrderId,
+			senderDomain,
+			merchant,
+			title: subject || null,
+			confidence: 'low'
+		};
+	}
+
+	// Neither tracking# nor strict order# — falls through as tracking_only
+	// with everything null so the scan disposition routes it to Failed.
 	return {
 		emailType: 'tracking_only',
-		trackingNumber: hit?.tracking ?? null,
-		carrier,
-		carrierSlug,
-		orderId,
+		trackingNumber: null,
+		carrier: null,
+		carrierSlug: null,
+		orderId: looseOrderId,
 		senderDomain,
+		merchant,
 		title: subject || null,
-		confidence
+		confidence: 'low'
 	};
 }

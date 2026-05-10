@@ -187,7 +187,8 @@ export type EmailType =
 	| 'marketing'
 	| 'review_request'
 	| 'unknown'
-	| 'tracking_only';
+	| 'tracking_only'
+	| 'order_confirmation';
 
 export type ImportRowDisposition = 'pending' | 'accepted' | 'skipped' | 'failed';
 export type MatchConfidence = 'exact' | 'alias' | 'fuzzy' | 'none';

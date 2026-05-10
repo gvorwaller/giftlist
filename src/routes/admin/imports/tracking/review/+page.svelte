@@ -70,9 +70,10 @@
 			<input type="hidden" name="run_id" value={data.run.id} />
 			<p class="muted bulk">
 				<strong>Accept</strong> creates a self-package and registers the tracking number with
-				Shippo ($0.01 each). <strong>Skip</strong> moves the email to Processed without billing.
-				<strong>Leave pending</strong> keeps the email in the inbox for re-evaluation on the next
-				scan. The "Accept all" / "Skip all" buttons at the bottom batch this for the whole run.
+				Shippo ($0.01 each). Order-confirmation rows (no tracking yet) accept without billing —
+				the eventual shipment email upgrades the gift via order# match. <strong>Skip</strong>
+				moves the email to Processed without billing. <strong>Leave pending</strong> keeps the
+				email in the inbox for re-evaluation on the next scan.
 			</p>
 
 			<ul class="rows">
@@ -92,6 +93,8 @@
 							</div>
 							{#if inference?.kind === 'link'}
 								<div class="infer link">→ link to gift #{inference.giftId}</div>
+							{:else if inference?.kind === 'new-no-tracking'}
+								<div class="infer new pending-tracking">→ new self-package (no tracking yet)</div>
 							{:else}
 								<div class="infer new">→ new self-package</div>
 							{/if}
@@ -125,7 +128,9 @@
 								<span
 									>Accept → {inference?.kind === 'link'
 										? `link to existing gift`
-										: 'create self-package + register'}</span
+										: inference?.kind === 'new-no-tracking'
+											? 'create self-package (no Shippo registration)'
+											: 'create self-package + register'}</span
 								>
 							</label>
 							<label class="radio">
@@ -331,6 +336,7 @@
 	}
 	.infer.link { background: var(--green-soft); color: var(--green); }
 	.infer.new { background: var(--amber-soft); color: var(--amber); }
+	.infer.new.pending-tracking { background: var(--bg); color: var(--muted); border: 1px dashed var(--line); }
 
 	.parsed {
 		font-family: var(--font-sans);
