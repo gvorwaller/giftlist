@@ -20,6 +20,19 @@
 	const returnable = $derived(canReturn(data.gift.status));
 	const isArchived = $derived(data.gift.is_archived === 1);
 
+	// Surface a deep-link to Amazon's tracker whenever the tracking number is
+	// TBA-shaped, even on gifts imported before migration 017 (which never
+	// captured amazon_tracking_url). The constructed URL matches what the
+	// Amazon import parser stores when a "Track package" link is present.
+	const amazonTrackingUrl = $derived.by(() => {
+		if (data.gift.amazon_tracking_url) return data.gift.amazon_tracking_url;
+		const tn = data.gift.tracking_number;
+		if (tn && /^TBA\d{12}$/i.test(tn.trim())) {
+			return `https://track.amazon.com/tracking/${tn.trim().toUpperCase()}`;
+		}
+		return null;
+	});
+
 	let confirmingArchive = $state(false);
 
 	function formAction(to: NonNullable<ReturnType<typeof nextForwardStatus>> | 'returned'): string {
@@ -185,7 +198,7 @@
 		{/if}
 	{/if}
 
-	{#if data.gift.tracking_number || data.gift.amazon_tracking_url}
+	{#if data.gift.tracking_number || amazonTrackingUrl}
 		<section class="card">
 			<div class="tracking-head">
 				<div>
@@ -198,7 +211,7 @@
 								· {data.gift.carrier}
 							{/if}
 						</p>
-					{:else if data.gift.amazon_tracking_url}
+					{:else if amazonTrackingUrl}
 						<p class="body muted">Amazon Logistics · no tracking number captured</p>
 					{/if}
 					{#if data.gift.tracking_status}
@@ -218,9 +231,9 @@
 					{/if}
 				</div>
 				<div class="tracking-actions">
-					{#if data.gift.amazon_tracking_url}
+					{#if amazonTrackingUrl}
 						<a
-							href={data.gift.amazon_tracking_url}
+							href={amazonTrackingUrl}
 							target="_blank"
 							rel="noopener noreferrer"
 							class="ghost small"
