@@ -90,6 +90,7 @@ export interface Gift {
 	tracking_status_at: string | null;
 	tracking_estimated_delivery: string | null;
 	tracking_provider_id: string | null;
+	amazon_tracking_url: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -211,6 +212,7 @@ export interface ImportRow {
 	parsed_shipping_address: string | null;
 	parsed_gift_message: string | null;
 	parsed_sender_domain: string | null;
+	parsed_amazon_tracking_url: string | null;
 	match_person_id: number | null;
 	match_confidence: MatchConfidence | null;
 	match_candidates_json: string | null;

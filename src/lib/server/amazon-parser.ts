@@ -21,6 +21,14 @@ export interface ParsedAmazonEmail {
 	recipientName: string | null;
 	shippingAddress: string | null;
 	giftMessage: string | null;
+	/**
+	 * td-b221ae: "Track package" CTA URL parsed from shipped/delivered emails.
+	 * Stored on the gift so /app/gifts/[id] can offer a tap-target into the
+	 * Amazon tracker, especially when the email didn't expose a carrier
+	 * tracking number (the Amazon Logistics TBA case). Populated only for
+	 * `shipped` and `delivered` email types.
+	 */
+	trackingUrl: string | null;
 }
 
 const MARKETING_SUBJECT_HINTS = [
@@ -184,6 +192,106 @@ function extractRecipientName(body: string, shippingAddress: string | null): str
 	return m ? m[1].trim() : null;
 }
 
+/**
+ * td-b221ae: extract the "Track package" CTA URL from a shipped/delivered email.
+ *
+ * Amazon's HTML body wraps the button as an anchor; the text alternative
+ * often omits the href. We prefer HTML, fall back to text, decode HTML
+ * entities + Gmail redirect wrappers, and only accept Amazon-hosted URLs so
+ * we don't store unrelated promo or pixel-tracking links.
+ */
+const AMAZON_HREF_PATTERNS: RegExp[] = [
+	// Modern progress-tracker deep link.
+	/href=["'](https?:\/\/(?:www\.)?amazon\.com\/[^"'<>\s]*progress-tracker[^"'<>\s]*)["']/i,
+	// ship-track / your-account legacy.
+	/href=["'](https?:\/\/(?:www\.)?amazon\.com\/[^"'<>\s]*(?:gp\/your-account\/ship-track|ship-track)[^"'<>\s]*)["']/i,
+	// Public Amazon Logistics tracker.
+	/href=["'](https?:\/\/track\.amazon\.com\/[^"'<>\s]*)["']/i,
+	// Gmail-rewritten outbound link that wraps an Amazon URL in the q= param.
+	// We unwrap it before the host check so it has to mention amazon somewhere
+	// in the wrapper to avoid false positives on other Google-redirected links.
+	/href=["'](https?:\/\/(?:www\.)?google\.com\/url\?[^"'<>\s]*amazon[^"'<>\s]*)["']/i
+];
+
+const AMAZON_BARE_URL_PATTERNS: RegExp[] = [
+	/(https?:\/\/(?:www\.)?amazon\.com\/[^\s<>"']*progress-tracker[^\s<>"']*)/i,
+	/(https?:\/\/(?:www\.)?amazon\.com\/[^\s<>"']*(?:gp\/your-account\/ship-track|ship-track)[^\s<>"']*)/i,
+	/(https?:\/\/track\.amazon\.com\/[^\s<>"']*)/i
+];
+
+function decodeHtmlEntities(s: string): string {
+	return s
+		.replace(/&amp;/g, '&')
+		.replace(/&#x2F;/gi, '/')
+		.replace(/&#47;/g, '/')
+		.replace(/&quot;/g, '"')
+		.replace(/&#39;/g, "'")
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>');
+}
+
+function unwrapGmailRedirect(url: string): string {
+	// Gmail rewrites outbound links as https://www.google.com/url?...&q=ENCODED
+	const m = url.match(/^https?:\/\/(?:www\.)?google\.com\/url\?[^"'<>\s]*[?&]q=([^&"'<>\s]+)/i);
+	if (!m) return url;
+	try {
+		return decodeURIComponent(m[1]);
+	} catch {
+		return url;
+	}
+}
+
+function looksLikeAmazonHost(url: string): boolean {
+	try {
+		const u = new URL(url);
+		const host = u.hostname.toLowerCase();
+		return (
+			host === 'amazon.com' ||
+			host.endsWith('.amazon.com') ||
+			host === 'track.amazon.com' ||
+			host === 'a.co'
+		);
+	} catch {
+		return false;
+	}
+}
+
+export function extractAmazonTrackingUrl(
+	bodyHtml: string | null | undefined,
+	bodyText: string | null | undefined
+): string | null {
+	const html = bodyHtml || '';
+	if (html) {
+		for (const re of AMAZON_HREF_PATTERNS) {
+			const m = html.match(re);
+			if (m) {
+				const raw = unwrapGmailRedirect(decodeHtmlEntities(m[1]));
+				if (looksLikeAmazonHost(raw)) return raw;
+			}
+		}
+		// HTML present but anchors didn't match — still scan for bare URLs as a
+		// last-ditch effort (some Amazon templates render the link inline).
+		for (const re of AMAZON_BARE_URL_PATTERNS) {
+			const m = html.match(re);
+			if (m) {
+				const raw = unwrapGmailRedirect(decodeHtmlEntities(m[1]));
+				if (looksLikeAmazonHost(raw)) return raw;
+			}
+		}
+	}
+	const text = bodyText || '';
+	if (text) {
+		for (const re of AMAZON_BARE_URL_PATTERNS) {
+			const m = text.match(re);
+			if (m) {
+				const raw = unwrapGmailRedirect(m[1]);
+				if (looksLikeAmazonHost(raw)) return raw;
+			}
+		}
+	}
+	return null;
+}
+
 function extractGiftMessage(body: string): string | null {
 	// Amazon includes "Gift Message:" or "Gift message:" in order confirmations
 	// when the order was marked as a gift.
@@ -209,7 +317,8 @@ export function parseAmazonEmail(msg: GmailMessageFull): ParsedAmazonEmail {
 			carrier: null,
 			recipientName: null,
 			shippingAddress: null,
-			giftMessage: null
+			giftMessage: null,
+			trackingUrl: null
 		};
 	}
 
@@ -222,6 +331,15 @@ export function parseAmazonEmail(msg: GmailMessageFull): ParsedAmazonEmail {
 	const recipientName = extractRecipientName(body, shippingAddress);
 	const giftMessage = extractGiftMessage(body);
 
+	// Only populate trackingUrl for shipped/delivered. order_placed emails
+	// occasionally embed a placeholder link too but storing it on the gift
+	// before the package actually ships causes the UI to surface a button
+	// that 404s on Amazon's end.
+	const trackingUrl =
+		emailType === 'shipped' || emailType === 'delivered'
+			? extractAmazonTrackingUrl(msg.bodyHtml, msg.bodyText)
+			: null;
+
 	return {
 		emailType,
 		title,
@@ -231,6 +349,7 @@ export function parseAmazonEmail(msg: GmailMessageFull): ParsedAmazonEmail {
 		carrier,
 		recipientName,
 		shippingAddress,
-		giftMessage
+		giftMessage,
+		trackingUrl
 	};
 }

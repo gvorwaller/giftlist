@@ -103,9 +103,9 @@ export async function runAmazonScan(
 				   import_run_id, source_message_id, source_thread_id, subject, received_at,
 				   from_address, email_type, parsed_title, parsed_order_id, parsed_price_cents,
 				   parsed_tracking_number, parsed_carrier, parsed_recipient_name,
-				   parsed_shipping_address, parsed_gift_message, match_person_id,
-				   match_confidence, match_candidates_json, disposition
-				 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				   parsed_shipping_address, parsed_gift_message, parsed_amazon_tracking_url,
+				   match_person_id, match_confidence, match_candidates_json, disposition
+				 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			);
 
 			let summaries;
@@ -180,6 +180,7 @@ export async function runAmazonScan(
 						parse.recipientName,
 						parse.shippingAddress,
 						parse.giftMessage,
+						parse.trackingUrl,
 						match.personId,
 						match.confidence,
 						candidatesJson,
@@ -515,7 +516,8 @@ function resolveOrCreateGift(row: ImportRow, personId: number, userId: number): 
 			price_cents: row.parsed_price_cents,
 			notes: row.parsed_gift_message ?? null,
 			status: 'ordered',
-			is_idea: false
+			is_idea: false,
+			amazon_tracking_url: row.parsed_amazon_tracking_url
 		},
 		userId
 	);
@@ -532,6 +534,9 @@ function applyLifecycleEvent(giftId: number, row: ImportRow, userId: number): vo
 	if (row.parsed_carrier && !current.carrier) patch.carrier = row.parsed_carrier;
 	if (row.parsed_price_cents && !current.price_cents) patch.price_cents = row.parsed_price_cents;
 	if (row.parsed_order_id && !current.order_id) patch.order_id = row.parsed_order_id;
+	if (row.parsed_amazon_tracking_url && !current.amazon_tracking_url) {
+		patch.amazon_tracking_url = row.parsed_amazon_tracking_url;
+	}
 	if (Object.keys(patch).length > 0) {
 		updateGift(giftId, patch, userId);
 	}

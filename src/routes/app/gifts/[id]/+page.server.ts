@@ -9,6 +9,8 @@ import {
 	pullStatus,
 	registerWithProvider
 } from '$server/tracking';
+import { isAmazonLogisticsTracking } from '$server/amazon-tracker';
+import { getShipperById } from '$server/shippers';
 import type { GiftStatus } from '$server/types';
 
 function requireGift(params: { id: string }, currentUserId: number | undefined) {
@@ -105,18 +107,26 @@ export const actions: Actions = {
 	refreshTracking: async ({ params, locals }) => {
 		if (!locals.user) throw redirect(303, '/login');
 		const gift = requireGift(params, locals.user.id);
-		// Use 4xx status codes for these failures even though they're "upstream"
-		// errors. Cloudflare swaps 5xx upstream responses for its branded "Bad
-		// gateway" page, which hides our inline error message — defeats the
-		// whole point of returning structured form data here.
-		if (!isTrackingProviderConfigured()) {
+		if (!gift.tracking_number) {
+			return fail(400, { trackingError: 'No tracking number on this gift yet.' });
+		}
+
+		// td-b221ae: Amazon Logistics gifts skip Shippo entirely. shouldUseAmazonPath
+		// mirrors the tracking.ts internal check; we recompute it here so the action
+		// can distinguish a successful Amazon fetch (status updated, redirect) from
+		// a parse miss (return a soft trackingNote, no redirect, keep the page open).
+		const isAmazonPath =
+			isAmazonLogisticsTracking(gift.tracking_number) ||
+			(!!gift.shipper && getShipperById(gift.shipper.id)?.name === 'Amazon Logistics');
+
+		// Use 4xx for upstream errors so Cloudflare doesn't swap our inline
+		// message for its branded "Bad gateway" page.
+		if (!isAmazonPath && !isTrackingProviderConfigured()) {
 			return fail(400, { trackingError: 'Shippo not configured.' });
 		}
+
 		try {
 			if (!gift.tracking_provider_id) {
-				if (!gift.tracking_number) {
-					return fail(400, { trackingError: 'No tracking number on this gift yet.' });
-				}
 				await registerWithProvider(gift.id, locals.user.id);
 			} else {
 				await pullStatus(gift.id, locals.user.id);
@@ -126,6 +136,20 @@ export const actions: Actions = {
 				trackingError: err instanceof Error ? err.message : 'Tracking refresh failed.'
 			});
 		}
+
+		if (isAmazonPath) {
+			// Re-load to see whether the fetch produced any status. Amazon's
+			// tracker is brittle and often returns nothing parseable; in that
+			// case nudge the user toward the deep-link button instead.
+			const after = getGiftWithContext(gift.id);
+			if (!after?.tracking_status) {
+				return fail(400, {
+					trackingNote:
+						'Amazon Logistics didn’t return parseable status. Tap "Open Amazon tracking" for live details.'
+				});
+			}
+		}
+
 		throw redirect(303, `/app/gifts/${gift.id}`);
 	}
 };

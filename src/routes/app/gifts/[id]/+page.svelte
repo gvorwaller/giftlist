@@ -185,18 +185,22 @@
 		{/if}
 	{/if}
 
-	{#if data.gift.tracking_number}
+	{#if data.gift.tracking_number || data.gift.amazon_tracking_url}
 		<section class="card">
 			<div class="tracking-head">
 				<div>
 					<p class="eyebrow">Tracking</p>
-					<p class="body">
-						{data.gift.tracking_number}{#if data.gift.shipper}
-							· {data.gift.shipper.name}
-						{:else if data.gift.carrier}
-							· {data.gift.carrier}
-						{/if}
-					</p>
+					{#if data.gift.tracking_number}
+						<p class="body">
+							{data.gift.tracking_number}{#if data.gift.shipper}
+								· {data.gift.shipper.name}
+							{:else if data.gift.carrier}
+								· {data.gift.carrier}
+							{/if}
+						</p>
+					{:else if data.gift.amazon_tracking_url}
+						<p class="body muted">Amazon Logistics · no tracking number captured</p>
+					{/if}
 					{#if data.gift.tracking_status}
 						<p class="tracking-status">
 							<strong>{data.gift.tracking_status}</strong>
@@ -213,14 +217,27 @@
 						</p>
 					{/if}
 				</div>
-				{#if data.trackingProviderConfigured}
-					<form method="POST" action="?/refreshTracking" class="refresh-form">
-						<button type="submit" class="ghost small">Refresh</button>
-					</form>
-				{/if}
+				<div class="tracking-actions">
+					{#if data.gift.amazon_tracking_url}
+						<a
+							href={data.gift.amazon_tracking_url}
+							target="_blank"
+							rel="noopener noreferrer"
+							class="ghost small"
+						>Open Amazon tracking ↗</a>
+					{/if}
+					{#if data.gift.tracking_number}
+						<form method="POST" action="?/refreshTracking" class="refresh-form">
+							<button type="submit" class="ghost small">Refresh</button>
+						</form>
+					{/if}
+				</div>
 			</div>
 			{#if form?.trackingError}
 				<p class="tracking-err" role="alert">{form.trackingError}</p>
+			{/if}
+			{#if form?.trackingNote}
+				<p class="tracking-note" role="status">{form.trackingNote}</p>
 			{/if}
 
 			{#if data.shipmentEvents.length > 0}
@@ -537,6 +554,28 @@
 		margin-top: 8px;
 		color: var(--rose);
 		font-size: 14px;
+	}
+
+	.tracking-note {
+		margin-top: 8px;
+		color: var(--muted);
+		font-family: var(--font-sans);
+		font-size: 14px;
+	}
+
+	.tracking-actions {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		align-items: flex-end;
+		flex-shrink: 0;
+	}
+
+	.tracking-actions .ghost.small {
+		text-align: center;
+		text-decoration: none;
+		display: inline-flex;
+		align-items: center;
 	}
 
 	.refresh-form {

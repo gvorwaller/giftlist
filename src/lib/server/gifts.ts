@@ -22,6 +22,7 @@ export interface GiftCreateInput {
 	is_idea?: boolean;
 	vendor_id?: number | null;
 	shipper_id?: number | null;
+	amazon_tracking_url?: string | null;
 }
 
 export interface GiftUpdateInput {
@@ -42,6 +43,7 @@ export interface GiftUpdateInput {
 	tracking_status_at?: string | null;
 	tracking_estimated_delivery?: string | null;
 	tracking_provider_id?: string | null;
+	amazon_tracking_url?: string | null;
 }
 
 export interface GiftWithContext extends Gift {
@@ -129,8 +131,8 @@ export function createGift(input: GiftCreateInput, actorUserId: number): Gift {
 			`INSERT INTO gifts (
 			   person_id, occasion_id, occasion_year, title, source, source_url,
 			   order_id, tracking_number, carrier, price_cents, status, notes, is_idea,
-			   vendor_id, shipper_id
-			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			   vendor_id, shipper_id, amazon_tracking_url
+			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.run(
 			input.person_id,
@@ -147,7 +149,8 @@ export function createGift(input: GiftCreateInput, actorUserId: number): Gift {
 			input.notes ?? null,
 			is_idea,
 			vendor_id,
-			shipper_id
+			shipper_id,
+			input.amazon_tracking_url ?? null
 		);
 	const id = Number(info.lastInsertRowid);
 	const gift = getGiftById(id)!;
@@ -183,7 +186,8 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 		'tracking_status',
 		'tracking_status_at',
 		'tracking_estimated_delivery',
-		'tracking_provider_id'
+		'tracking_provider_id',
+		'amazon_tracking_url'
 	];
 	const changed: string[] = [];
 	for (const col of columns) {
@@ -237,7 +241,7 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 		    person_id = ?, title = ?, source = ?, source_url = ?, occasion_id = ?, occasion_year = ?,
 		    order_id = ?, tracking_number = ?, carrier = ?, price_cents = ?, notes = ?, vendor_id = ?,
 		    shipper_id = ?, tracking_status = ?, tracking_status_at = ?,
-		    tracking_estimated_delivery = ?, tracking_provider_id = ?,
+		    tracking_estimated_delivery = ?, tracking_provider_id = ?, amazon_tracking_url = ?,
 		    updated_at = CURRENT_TIMESTAMP
 		  WHERE id = ?`
 	).run(
@@ -258,6 +262,7 @@ export function updateGift(id: number, input: GiftUpdateInput, actorUserId: numb
 		merged.tracking_status_at,
 		merged.tracking_estimated_delivery,
 		merged.tracking_provider_id,
+		merged.amazon_tracking_url,
 		id
 	);
 	const after = getGiftById(id)!;

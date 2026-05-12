@@ -3,6 +3,12 @@ import { getDb } from './db';
 import { getGiftById, updateGift } from './gifts';
 import { getShipperById } from './shippers';
 import { logAudit } from './audit';
+import {
+	fetchAmazonTracking,
+	isAmazonLogisticsTracking,
+	recipientZipFrom,
+	type AmazonTrackerResult
+} from './amazon-tracker';
 import type { Gift, ShipmentEvent } from './types';
 
 const SHIPPO_BASE = 'https://api.goshippo.com';
@@ -132,15 +138,96 @@ export async function registerWithProvider(
 	return work;
 }
 
+/**
+ * td-b221ae: Amazon Logistics gets its own refresh path because Shippo has no
+ * slug for it. We detect the Amazon case by either a TBA-shaped tracking
+ * number or an explicit "Amazon Logistics" shipper assignment; the free-text
+ * `carrier` column is deliberately not consulted (historically noisy).
+ */
+function shouldUseAmazonPath(gift: Gift): boolean {
+	if (isAmazonLogisticsTracking(gift.tracking_number)) return true;
+	if (gift.shipper_id) {
+		const shipper = getShipperById(gift.shipper_id);
+		if (shipper?.name === 'Amazon Logistics') return true;
+	}
+	return false;
+}
+
+function shippingZipForGift(gift: Gift): string | null {
+	const db = getDb();
+	const row = db
+		.prepare<[number], { default_shipping_address: string | null }>(
+			'SELECT default_shipping_address FROM people WHERE id = ?'
+		)
+		.get(gift.person_id);
+	return recipientZipFrom(row?.default_shipping_address ?? null);
+}
+
+export function applyAmazonStatusUpdate(
+	giftId: number,
+	result: AmazonTrackerResult,
+	actorUserId: number
+): { status: string | null; eventsAppended: number } {
+	if (!result.status) return { status: null, eventsAppended: 0 };
+	updateGift(
+		giftId,
+		{
+			tracking_status: result.status,
+			tracking_status_at: result.statusAt,
+			tracking_estimated_delivery: result.estimatedDelivery
+		},
+		actorUserId
+	);
+	return { status: result.status, eventsAppended: 0 };
+}
+
+/**
+ * Amazon Logistics refresh path. Shared by registerWithProvider and pullStatus
+ * since "register" is a no-op concept for Amazon — there's no provider_id.
+ * Returns the AmazonTrackerResult so callers can distinguish a successful
+ * fetch (status non-null) from a parse miss (all-null) and surface a soft
+ * UX note ("open the tracking link") rather than a hard error.
+ */
+async function refreshViaAmazon(
+	gift: Gift,
+	actorUserId: number
+): Promise<AmazonTrackerResult> {
+	if (!gift.tracking_number) {
+		return { status: null, statusAt: null, estimatedDelivery: null, rawStatusText: null };
+	}
+	const zip = shippingZipForGift(gift);
+	const result = await fetchAmazonTracking(gift.tracking_number, zip);
+	applyAmazonStatusUpdate(gift.id, result, actorUserId);
+	logAudit({
+		actorUserId,
+		entityType: 'tracking',
+		entityId: gift.id,
+		action: 'amazon_fetch',
+		summary: result.status
+			? `Amazon tracker: ${result.status}${result.estimatedDelivery ? ` (ETA ${result.estimatedDelivery})` : ''}`
+			: `Amazon tracker: no status returned for ${gift.tracking_number}`
+	});
+	return result;
+}
+
 async function doRegisterWithProvider(
 	giftId: number,
 	actorUserId: number
 ): Promise<string | null> {
-	const cfg = readConfig();
-	if (!cfg) return null;
 	const gift = getGiftById(giftId);
 	if (!gift || !gift.tracking_number || !gift.tracking_number.trim()) return null;
 	if (gift.tracking_provider_id) return gift.tracking_provider_id;
+
+	// td-b221ae: Amazon Logistics never gets registered with Shippo (Shippo has
+	// no slug for it). Skip the registration entirely and fetch status from
+	// Amazon directly. Returns null because there's no provider_id to persist.
+	if (shouldUseAmazonPath(gift)) {
+		await refreshViaAmazon(gift, actorUserId);
+		return null;
+	}
+
+	const cfg = readConfig();
+	if (!cfg) return null;
 
 	// Shippo requires a carrier slug — there's no auto-detect. We use the
 	// linked shipper's slug; if absent, default to USPS as the most likely
@@ -186,10 +273,17 @@ export async function pullStatus(
 	giftId: number,
 	actorUserId: number
 ): Promise<{ status: string | null; eventsAppended: number } | null> {
-	const cfg = readConfig();
-	if (!cfg) return null;
 	const gift = getGiftById(giftId);
 	if (!gift || !gift.tracking_number) return null;
+
+	// td-b221ae: Amazon Logistics has its own refresh path; never touches Shippo.
+	if (shouldUseAmazonPath(gift)) {
+		const result = await refreshViaAmazon(gift, actorUserId);
+		return { status: result.status, eventsAppended: 0 };
+	}
+
+	const cfg = readConfig();
+	if (!cfg) return null;
 
 	const shipper = gift.shipper_id ? getShipperById(gift.shipper_id) : null;
 	const carrier = shipper?.tracking_provider_slug ?? 'usps';
@@ -281,6 +375,13 @@ function formatLocation(loc: ShippoLocation | null | undefined): string | null {
  * only the viewer's own self-orders + all shared (non-self) gifts are
  * considered. Pass null/undefined ONLY from admin-side or scheduled-job
  * call sites where the full set is intended.
+ *
+ * td-b221ae: Amazon Logistics gifts are deliberately excluded from this
+ * scheduled poller. They have `tracking_provider_id IS NULL` (we skip Shippo
+ * registration for them), so the WHERE clause already filters them out. We
+ * intentionally don't add an Amazon path here — Amazon's public tracker is
+ * unauthenticated and would amplify rate-limit risk if we polled it for
+ * every TBA gift on a schedule. Manual refresh from /app/gifts/[id] only.
  */
 export async function pullAllInFlight(
 	actorUserId: number,
