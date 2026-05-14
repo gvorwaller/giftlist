@@ -50,6 +50,23 @@ export interface TodayData {
  */
 const HANDLED_STATUSES = new Set(['given', 'returned']);
 
+/**
+ * Statuses that disqualify an occasion from the Next-Best-Thing prompt.
+ * The "no gift marked bought yet" copy is literally about purchase: once a
+ * gift is in `ordered` or later, the manager has bought it and nextBestAction
+ * should rotate to the next person who actually still needs a purchase.
+ * `idea` and `planned` still nudge ("chosen but not bought yet" counts as
+ * still-to-do). td-0c8de5 follow-up.
+ */
+const BOUGHT_STATUSES: ReadonlySet<string> = new Set([
+	'ordered',
+	'shipped',
+	'delivered',
+	'wrapped',
+	'given',
+	'returned'
+]);
+
 /** Open = anywhere in the lifecycle that needs manager follow-through.
  * Excludes 'idea' (just brainstorming) and the two terminal states. */
 export const OPEN_GIFT_STATUSES: readonly string[] = [
@@ -170,7 +187,14 @@ export function loadTodayData(userId: number): TodayData {
 	const upcoming = loadUpcomingWindow(60);
 	annotateGiftState(upcoming);
 
-	const needsAttention = upcoming.filter((o) => !o.hasHandledGift);
+	// nextBestAction surfaces the next purchase to make. Filter out people
+	// whose top gift is already bought (ordered+) — they're handled by the
+	// Coming Up Soon list and its BOUGHT pill. hasHandledGift alone was too
+	// narrow ({given, returned}) and would surface someone with 2 ordered
+	// gifts as "no gift marked bought yet". td-0c8de5 follow-up.
+	const needsAttention = upcoming.filter(
+		(o) => !o.hasHandledGift && !(o.bestGiftStatus && BOUGHT_STATUSES.has(o.bestGiftStatus))
+	);
 	const nextBestAction = needsAttention[0] ?? null;
 	const comingUp = upcoming
 		.filter((o) => o !== nextBestAction)
