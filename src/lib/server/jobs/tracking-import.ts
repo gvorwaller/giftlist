@@ -483,24 +483,36 @@ async function acceptTrackingRow(row: ImportRow, userId: number): Promise<Accept
 	// 2. Order-id match constrained by sender-domain / vendor agreement.
 	//    Plain order_id match is too loose (merchants reuse short numeric
 	//    order numbers across customers).
+	//
+	//    td-3d1ee6 added the self-package fallback (clause (c)). The order-
+	//    confirmation accept path historically created self-packages with
+	//    vendor_id=NULL AND source_url=NULL, so neither (a) nor (b) could
+	//    fire and a later shipment email would orphan a duplicate. A
+	//    self-package owned by the same actor on the same order_id is a
+	//    safe match: the cross-customer collision the constraint was
+	//    designed to prevent can't happen within one actor's own packages.
 	if (row.parsed_order_id && row.parsed_sender_domain) {
 		const sender = row.parsed_sender_domain;
-		// Match if either:
-		//   (a) gift's vendor name normalized matches the sender's domain root, or
-		//   (b) gift's source_url contains the sender domain
 		const byOrder = db
-			.prepare<[string, string, string], Gift>(
+			.prepare<[string, string, string, number], Gift>(
 				`SELECT g.*
 				   FROM gifts g
 				   LEFT JOIN vendors v ON v.id = g.vendor_id
+				   LEFT JOIN people  p ON p.id = g.person_id
 				  WHERE g.order_id = ? AND g.is_archived = 0
 				    AND (
 				      LOWER(v.name) = ?
 				      OR INSTR(LOWER(COALESCE(g.source_url, '')), ?) > 0
+				      OR (p.is_self = 1 AND p.owner_user_id = ?)
 				    )
 				  ORDER BY g.id DESC LIMIT 1`
 			)
-			.get(row.parsed_order_id, normalizeSenderForVendorMatch(sender), sender.toLowerCase());
+			.get(
+				row.parsed_order_id,
+				normalizeSenderForVendorMatch(sender),
+				sender.toLowerCase(),
+				userId
+			);
 
 		if (byOrder) {
 			// Found a gift whose order_id + sender agree. Patch null fields and
@@ -534,6 +546,14 @@ async function acceptTrackingRow(row: ImportRow, userId: number): Promise<Accept
 	}
 
 	// 3. Create a new self-package owned by the actor.
+	//
+	// td-3d1ee6: log the unmatched-tracking event so orphan creations are
+	// auditable in pm2 logs. If this fires when we believed an existing
+	// gift should have matched, the order_id + sender shape + the actor's
+	// self-package presence are enough to retrace the miss.
+	console.warn(
+		`[tracking-import] orphan self-package: no match on order_id=${row.parsed_order_id ?? '∅'} sender=${row.parsed_sender_domain ?? '∅'} tracking=${trackingNumber} — creating new self-package.`
+	);
 	const selfPerson = getOrCreateSelfPerson(userId); // throws if missing
 	const shipper = row.parsed_carrier ? getShipperByName(row.parsed_carrier) : null;
 	const title = row.subject?.trim() || row.parsed_sender_domain || '(imported package)';
@@ -548,6 +568,10 @@ async function acceptTrackingRow(row: ImportRow, userId: number): Promise<Accept
 			order_id: row.parsed_order_id,
 			tracking_number: trackingNumber,
 			carrier: row.parsed_carrier,
+			// td-3d1ee6: stash the sender domain as source_url so a future
+			// (re-)matched email can find this gift via the INSTR clause of
+			// the order-id match query. Cheap to populate, no downside.
+			source_url: row.parsed_sender_domain ? `https://${row.parsed_sender_domain}/` : null,
 			shipper_id: shipper?.id ?? null,
 			price_cents: null,
 			status: 'ordered',
@@ -612,6 +636,12 @@ async function acceptOrderConfirmationRow(row: ImportRow, userId: number): Promi
 	// Create a status='ordered' self-package. No Shippo call — there's nothing
 	// to register yet. Title prefers the email subject; falls back to merchant
 	// or sender domain if subject is missing.
+	//
+	// td-3d1ee6: stash sender_domain in source_url so the eventual shipment
+	// email's order-id match query (acceptTrackingRow clause b — INSTR on
+	// source_url) finds this gift and upgrades it, instead of creating a
+	// duplicate self-package. Clause c (self-package owned by actor) covers
+	// the legacy backfill case where source_url is already null.
 	const selfPerson = getOrCreateSelfPerson(userId);
 	const title =
 		row.subject?.trim() || row.parsed_sender_domain || '(imported order)';
@@ -625,6 +655,7 @@ async function acceptOrderConfirmationRow(row: ImportRow, userId: number): Promi
 			order_id: orderId,
 			tracking_number: null,
 			carrier: null,
+			source_url: row.parsed_sender_domain ? `https://${row.parsed_sender_domain}/` : null,
 			shipper_id: null,
 			price_cents: null,
 			status: 'ordered',
