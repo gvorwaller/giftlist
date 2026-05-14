@@ -167,19 +167,14 @@ function collectUpcoming(leadDays: number): UpcomingItem[] {
 	// so an occasion never collapses below the global default but can
 	// surface earlier (e.g., 116 days for Christmas) when set higher.
 
-	const results: UpcomingItem[] = [];
-	const handledCountStmt = db.prepare<
-		[number, number, ...string[]],
-		{ cnt: number }
-	>(
-		`SELECT COUNT(*) AS cnt FROM gifts
-		  WHERE is_archived = 0
-		    AND person_id = ?
-		    AND occasion_id = ?
-		    AND status IN (${Array.from(HANDLED_STATUSES).map(() => '?').join(',')})`
-	);
-	const handledStatuses = Array.from(HANDLED_STATUSES);
-
+	// Two-stage build. Stage 1: collect candidate UpcomingItems with
+	// hasHandledGift=false. Stage 2: per person, sort by daysUntil and run
+	// an exact (person, occasion) handled-count query; if zero, fall back
+	// to a "loose" person-only query that ALSO catches NULL-occasion gifts
+	// (Amazon imports), claimed by the nearest occasion only. Without the
+	// fallback, ordered Amazon gifts with occasion_id=NULL would falsely
+	// flag the occasion as needing attention. td-0c8de5 follow-up.
+	const candidates: Array<UpcomingItem & { personOccasionId: number; occasionId: number }> = [];
 	for (const r of rows) {
 		const occasion: Occasion = {
 			id: r.o_id,
@@ -205,9 +200,7 @@ function collectUpcoming(leadDays: number): UpcomingItem[] {
 			(occasion.kind === 'birthday' || occasion.kind === 'anniversary') && occasion.year != null
 				? next.getFullYear() - occasion.year
 				: null;
-		const handled =
-			(handledCountStmt.get(r.person_id, r.o_id, ...handledStatuses)?.cnt ?? 0) > 0;
-		results.push({
+		candidates.push({
 			personId: r.person_id,
 			personDisplayName: r.display_name,
 			occasionTitle: r.title,
@@ -215,10 +208,65 @@ function collectUpcoming(leadDays: number): UpcomingItem[] {
 			occurrenceDate: next,
 			daysUntil,
 			turnsAge,
-			hasHandledGift: handled
+			hasHandledGift: false,
+			personOccasionId: r.po_id,
+			occasionId: r.o_id
 		});
 	}
 
+	const handledStatuses = Array.from(HANDLED_STATUSES);
+	const exactHandledStmt = db.prepare<[number, number, ...string[]], { cnt: number }>(
+		`SELECT COUNT(*) AS cnt FROM gifts
+		  WHERE is_archived = 0
+		    AND person_id = ?
+		    AND occasion_id = ?
+		    AND status IN (${handledStatuses.map(() => '?').join(',')})`
+	);
+	const looseHandledStmt = db.prepare<[number, ...string[]], { cnt: number }>(
+		`SELECT COUNT(*) AS cnt FROM gifts
+		  WHERE is_archived = 0
+		    AND person_id = ?
+		    AND occasion_id IS NULL
+		    AND status IN (${handledStatuses.map(() => '?').join(',')})`
+	);
+
+	const byPerson = new Map<number, typeof candidates>();
+	for (const c of candidates) {
+		if (!byPerson.has(c.personId)) byPerson.set(c.personId, []);
+		byPerson.get(c.personId)!.push(c);
+	}
+	for (const list of byPerson.values()) {
+		list.sort((a, b) => a.daysUntil - b.daysUntil);
+		let looseClaimed = false;
+		let loosePresent: boolean | null = null;
+		for (const c of list) {
+			const exactHit =
+				(exactHandledStmt.get(c.personId, c.occasionId, ...handledStatuses)?.cnt ?? 0) > 0;
+			if (exactHit) {
+				c.hasHandledGift = true;
+				continue;
+			}
+			if (loosePresent === null) {
+				loosePresent =
+					(looseHandledStmt.get(c.personId, ...handledStatuses)?.cnt ?? 0) > 0;
+			}
+			if (loosePresent && !looseClaimed) {
+				c.hasHandledGift = true;
+				looseClaimed = true;
+			}
+		}
+	}
+
+	const results: UpcomingItem[] = candidates.map((c) => ({
+		personId: c.personId,
+		personDisplayName: c.personDisplayName,
+		occasionTitle: c.occasionTitle,
+		occasionKind: c.occasionKind,
+		occurrenceDate: c.occurrenceDate,
+		daysUntil: c.daysUntil,
+		turnsAge: c.turnsAge,
+		hasHandledGift: c.hasHandledGift
+	}));
 	results.sort((a, b) => a.daysUntil - b.daysUntil);
 	return results;
 }

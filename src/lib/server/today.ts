@@ -148,38 +148,72 @@ function loadUpcomingWindow(daysAhead: number): UpcomingOccasion[] {
 }
 
 /** Annotate each upcoming row with handled-gift state and the most-progressed
- * open status. One DB roundtrip per row: returns the top status by lifecycle
- * priority (given > returned > wrapped > delivered > shipped > ordered >
- * planned > idea). td-8de343 added bestGiftStatus; hasHandledGift retains
- * the Today filter semantics (given/returned only). */
+ * open status. Returns the top status by lifecycle priority (given > returned
+ * > wrapped > delivered > shipped > ordered > planned > idea). td-8de343
+ * added bestGiftStatus; hasHandledGift retains the Today filter semantics
+ * (given/returned only).
+ *
+ * Attribution: Amazon-imported gifts get `occasion_id = NULL` until the admin
+ * assigns one. Without special handling, those gifts wouldn't count toward
+ * any of the person's upcoming occasions and would surface false "no gift
+ * marked bought yet" prompts. We attribute NULL-occasion gifts to the
+ * person's NEAREST upcoming occasion only — a single Amazon gift can't
+ * legitimately cover a graduation tomorrow *and* a birthday in 6 months.
+ * td-0c8de5 follow-up.
+ */
 function annotateGiftState(occasions: UpcomingOccasion[]): void {
 	if (occasions.length === 0) return;
 	const db = getDb();
-	const stmt = db.prepare<[number, number], { status: GiftStatus }>(
+	const ORDER_CASE = `CASE status
+		WHEN 'given' THEN 1
+		WHEN 'returned' THEN 2
+		WHEN 'wrapped' THEN 3
+		WHEN 'delivered' THEN 4
+		WHEN 'shipped' THEN 5
+		WHEN 'ordered' THEN 6
+		WHEN 'planned' THEN 7
+		WHEN 'idea' THEN 8
+		ELSE 9
+	END`;
+	const exactStmt = db.prepare<[number, number], { status: GiftStatus }>(
 		`SELECT status FROM gifts
 		  WHERE is_archived = 0
 		    AND person_id = ?
 		    AND occasion_id = ?
-		  ORDER BY
-		    CASE status
-		      WHEN 'given' THEN 1
-		      WHEN 'returned' THEN 2
-		      WHEN 'wrapped' THEN 3
-		      WHEN 'delivered' THEN 4
-		      WHEN 'shipped' THEN 5
-		      WHEN 'ordered' THEN 6
-		      WHEN 'planned' THEN 7
-		      WHEN 'idea' THEN 8
-		      ELSE 9
-		    END
-		  LIMIT 1`
+		  ORDER BY ${ORDER_CASE} LIMIT 1`
 	);
+	const looseStmt = db.prepare<[number], { status: GiftStatus }>(
+		`SELECT status FROM gifts
+		  WHERE is_archived = 0
+		    AND person_id = ?
+		    AND occasion_id IS NULL
+		  ORDER BY ${ORDER_CASE} LIMIT 1`
+	);
+
+	// Group by person so the NEAREST occasion claims any NULL-occasion gift.
+	const byPerson = new Map<number, UpcomingOccasion[]>();
 	for (const o of occasions) {
-		const row = stmt.get(o.personId, o.occasionId);
-		if (!row) continue;
-		o.hasHandledGift = HANDLED_STATUSES.has(row.status);
-		// 'idea' isn't a committed gift — don't surface a pill for brainstorming.
-		o.bestGiftStatus = row.status === 'idea' ? null : row.status;
+		if (!byPerson.has(o.personId)) byPerson.set(o.personId, []);
+		byPerson.get(o.personId)!.push(o);
+	}
+	for (const list of byPerson.values()) {
+		list.sort((a, b) => a.daysUntil - b.daysUntil);
+	}
+
+	for (const [personId, list] of byPerson) {
+		let looseClaimed = false;
+		const looseRow = looseStmt.get(personId);
+		for (const o of list) {
+			let row = exactStmt.get(personId, o.occasionId);
+			if (!row && looseRow && !looseClaimed) {
+				row = looseRow;
+				looseClaimed = true;
+			}
+			if (!row) continue;
+			o.hasHandledGift = HANDLED_STATUSES.has(row.status);
+			// 'idea' isn't a committed gift — don't surface a pill for brainstorming.
+			o.bestGiftStatus = row.status === 'idea' ? null : row.status;
+		}
 	}
 }
 
