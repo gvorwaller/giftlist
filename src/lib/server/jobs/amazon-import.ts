@@ -13,6 +13,12 @@ import { isPersonVisibleToUser } from '../people';
 import { createGift, getGiftById, updateGift } from '../gifts';
 import { ensureVendor } from '../vendors';
 import { transitionGift, canTransition } from './../gift-status';
+import {
+	getOrderByOrderId,
+	listGiftsForOrder,
+	upsertOrderByOrderId
+} from '../orders';
+import type { ParsedAmazonItem } from '../amazon-parser';
 import type {
 	EmailType,
 	Gift,
@@ -104,8 +110,9 @@ export async function runAmazonScan(
 				   from_address, email_type, parsed_title, parsed_order_id, parsed_price_cents,
 				   parsed_tracking_number, parsed_carrier, parsed_recipient_name,
 				   parsed_shipping_address, parsed_gift_message, parsed_amazon_tracking_url,
+				   parsed_items_json,
 				   match_person_id, match_confidence, match_candidates_json, disposition
-				 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			);
 
 			let summaries;
@@ -164,6 +171,11 @@ export async function runAmazonScan(
 					const candidatesJson = JSON.stringify(match.candidates);
 					const disposition = defaultDisposition(parse.emailType);
 
+					// td-3e9ae2: persist the full per-line-item breakdown so the
+					// review UI can render N recipient pickers without re-parsing.
+					// Null when there are no items (marketing/review-request emails)
+					// so legacy consumers fall back cleanly to parsed_title.
+					const itemsJson = parse.items.length > 0 ? JSON.stringify(parse.items) : null;
 					insertRowStmt.run(
 						run.id,
 						s.id,
@@ -181,6 +193,7 @@ export async function runAmazonScan(
 						parse.shippingAddress,
 						parse.giftMessage,
 						parse.trackingUrl,
+						itemsJson,
 						match.personId,
 						match.confidence,
 						candidatesJson,
@@ -315,6 +328,18 @@ export interface CommitRowInput {
 	 */
 	assignedGiftId?: number;
 	saveAsAlias?: boolean;
+	/**
+	 * td-3e9ae2: per-line-item recipient assignments for a multi-item order.
+	 * When supplied (length >= 1), the commit path creates one `orders` row
+	 * plus N gifts (one per line item), each carrying its own person_id +
+	 * line_item_index. When omitted, behavior is unchanged: a single gift
+	 * is created from the row's top-level parsed fields.
+	 */
+	lineItems?: Array<{
+		lineItemIndex: number;
+		assignedPersonId: number;
+		assignedGiftId?: number;
+	}>;
 }
 
 export interface CommitResult {
@@ -390,6 +415,41 @@ export async function commitReviewedRows(
 
 		let giftId: number | null = linkedGift?.id ?? null;
 		for (const { d, row } of orderedGroup) {
+			// td-3e9ae2: multi-item path. When the admin specified per-line
+			// recipients (typically on the order_placed email of a 2+ item
+			// order), create one order + N gifts up front and skip the
+			// single-gift legacy path. Subsequent shipped/delivered emails
+			// for the same order auto-bind via applyLifecycleEvent → order
+			// sibling-walk.
+			if (d.lineItems && d.lineItems.length > 0 && !linkedGift) {
+				try {
+					const items = parseRowItems(row);
+					const ids = commitMultiItemAccept(row, d.lineItems, items, userId);
+					result.giftsCreated += ids.length;
+					// Use the first-item gift as the canonical id for the
+					// import_rows.gift_id column (one column, N gifts — pick
+					// the first stably). All N share the parent order_pk so
+					// follow-up emails advance the entire group.
+					giftId = ids[0] ?? null;
+					applyLifecycleEvent(giftId!, row, userId);
+					updateRow.run(
+						'accepted',
+						giftId,
+						d.lineItems[0].assignedPersonId,
+						row.match_confidence ?? 'none',
+						null,
+						row.id
+					);
+					messagesToMove.push(row.source_message_id);
+					continue;
+				} catch (err) {
+					const message = err instanceof Error ? err.message : String(err);
+					updateRow.run('failed', null, null, row.match_confidence, message, row.id);
+					result.rowsFailed += 1;
+					continue;
+				}
+			}
+
 			// Linked gift's person is authoritative; otherwise fall back to the
 			// admin's per-row pick or the auto-matched person.
 			const personId = linkedGift?.person_id ?? d.assignedPersonId ?? row.match_person_id ?? null;
@@ -488,6 +548,10 @@ function lifecycleOrder(t: EmailType): number {
 
 function resolveOrCreateGift(row: ImportRow, personId: number, userId: number): number {
 	const db = getDb();
+	// td-3e9ae2: every Amazon import (single- or multi-item) gets an orders row.
+	// Returns null when there's no order_id (e.g. malformed email).
+	const orderPk = ensureOrderForRow(row, userId);
+
 	// Existing gift already created from an earlier email in the same order group?
 	if (row.parsed_order_id) {
 		const hit = db
@@ -498,7 +562,17 @@ function resolveOrCreateGift(row: ImportRow, personId: number, userId: number): 
 				  ORDER BY id DESC LIMIT 1`
 			)
 			.get(row.parsed_order_id);
-		if (hit) return hit.id;
+		if (hit) {
+			// Backfill order_pk on legacy gifts the first time they're touched.
+			if (!hit.order_pk && orderPk) {
+				updateGift(hit.id, {}, userId); // touch updated_at
+				db.prepare('UPDATE gifts SET order_pk = ?, line_item_index = COALESCE(line_item_index, 0) WHERE id = ?').run(
+					orderPk,
+					hit.id
+				);
+			}
+			return hit.id;
+		}
 	}
 	// Auto-create the Amazon vendor on first import so admins don't have to
 	// pre-seed it. Subsequent imports just look it up.
@@ -517,36 +591,178 @@ function resolveOrCreateGift(row: ImportRow, personId: number, userId: number): 
 			notes: row.parsed_gift_message ?? null,
 			status: 'ordered',
 			is_idea: false,
-			amazon_tracking_url: row.parsed_amazon_tracking_url
+			amazon_tracking_url: row.parsed_amazon_tracking_url,
+			order_pk: orderPk,
+			line_item_index: orderPk ? 0 : null
 		},
 		userId
 	);
 	return gift.id;
 }
 
+/**
+ * td-3e9ae2: ensure an `orders` row exists for this import row's parsed_order_id.
+ * Idempotent — re-running across order_placed → shipped → delivered emails
+ * for the same order fills in tracking/timestamps without overwriting earlier
+ * values. Returns null when the row has no order_id to key on.
+ */
+function ensureOrderForRow(row: ImportRow, userId: number): number | null {
+	if (!row.parsed_order_id) return null;
+	const amazonVendor = ensureVendor('Amazon', userId);
+	const lifecycle = lifecycleTimestamps(row);
+	return upsertOrderByOrderId({
+		order_id: row.parsed_order_id,
+		vendor_id: amazonVendor.id,
+		tracking_number: row.parsed_tracking_number,
+		carrier: row.parsed_carrier,
+		amazon_tracking_url: row.parsed_amazon_tracking_url,
+		ordered_at: lifecycle.ordered_at,
+		shipped_at: lifecycle.shipped_at,
+		delivered_at: lifecycle.delivered_at,
+		source_message_id: row.source_message_id
+	});
+}
+
+/** Map email_type → which lifecycle timestamp this email stamps. */
+function lifecycleTimestamps(row: ImportRow): {
+	ordered_at: string | null;
+	shipped_at: string | null;
+	delivered_at: string | null;
+} {
+	const at = row.received_at;
+	if (row.email_type === 'order_placed') return { ordered_at: at, shipped_at: null, delivered_at: null };
+	if (row.email_type === 'shipped') return { ordered_at: null, shipped_at: at, delivered_at: null };
+	if (row.email_type === 'delivered') return { ordered_at: null, shipped_at: null, delivered_at: at };
+	return { ordered_at: null, shipped_at: null, delivered_at: null };
+}
+
+/**
+ * td-3e9ae2: multi-item accept. Creates ONE order row and N gifts (one per
+ * line item) when the admin specified per-line-item recipients in the review
+ * UI. Returns the list of created gift ids in line-item order.
+ */
+function commitMultiItemAccept(
+	row: ImportRow,
+	lineItems: NonNullable<CommitRowInput['lineItems']>,
+	items: ParsedAmazonItem[],
+	userId: number
+): number[] {
+	const orderPk = ensureOrderForRow(row, userId);
+	if (!orderPk) {
+		throw new Error(`Multi-item accept requires parsed_order_id, but row ${row.id} has none.`);
+	}
+	const amazonVendor = ensureVendor('Amazon', userId);
+	const createdGiftIds: number[] = [];
+
+	for (const li of lineItems) {
+		// Allow holes: a lineItem with no items[lineItemIndex] uses fallbacks
+		// from the row top-level (defensive — UI shouldn't send a bad index).
+		const item = items[li.lineItemIndex];
+		const title = item?.title ?? row.parsed_title ?? row.subject ?? '(imported)';
+		const priceCents = item?.priceCents ?? null;
+
+		// Per-user privacy guard (td-68804e parity).
+		if (!isPersonVisibleToUser(li.assignedPersonId, userId)) {
+			throw new Error(
+				`Recipient not visible to you (archived or another user's self-person).`
+			);
+		}
+
+		// Line-item-level link to an existing gift idea (weak-match acceptance).
+		if (li.assignedGiftId) {
+			const linked = getGiftById(li.assignedGiftId);
+			if (linked) {
+				updateGift(
+					linked.id,
+					{
+						order_id: row.parsed_order_id,
+						tracking_number: row.parsed_tracking_number ?? linked.tracking_number,
+						carrier: row.parsed_carrier ?? linked.carrier,
+						amazon_tracking_url:
+							row.parsed_amazon_tracking_url ?? linked.amazon_tracking_url,
+						price_cents: priceCents ?? linked.price_cents
+					},
+					userId
+				);
+				// Attach to the order + record line-item position. updateGift
+				// doesn't expose order_pk; touch directly.
+				getDb()
+					.prepare('UPDATE gifts SET order_pk = ?, line_item_index = ? WHERE id = ?')
+					.run(orderPk, li.lineItemIndex, linked.id);
+				// Forward-transition from idea/planned to ordered.
+				if (canTransition(linked.status, 'ordered')) {
+					transitionGift(linked.id, 'ordered', userId);
+				}
+				createdGiftIds.push(linked.id);
+				continue;
+			}
+		}
+
+		const gift = createGift(
+			{
+				person_id: li.assignedPersonId,
+				title,
+				vendor_id: amazonVendor.id,
+				occasion_id: null,
+				occasion_year: new Date().getFullYear(),
+				order_id: row.parsed_order_id,
+				tracking_number: row.parsed_tracking_number,
+				carrier: row.parsed_carrier,
+				price_cents: priceCents,
+				notes: row.parsed_gift_message ?? null,
+				status: 'ordered',
+				is_idea: false,
+				amazon_tracking_url: row.parsed_amazon_tracking_url,
+				order_pk: orderPk,
+				line_item_index: li.lineItemIndex
+			},
+			userId
+		);
+		createdGiftIds.push(gift.id);
+	}
+	return createdGiftIds;
+}
+
 function applyLifecycleEvent(giftId: number, row: ImportRow, userId: number): void {
-	const current = getGiftById(giftId);
-	if (!current) return;
-
-	// Merge newly-parsed fields that the first email may have missed.
-	const patch: Parameters<typeof updateGift>[1] = {};
-	if (row.parsed_tracking_number && !current.tracking_number) patch.tracking_number = row.parsed_tracking_number;
-	if (row.parsed_carrier && !current.carrier) patch.carrier = row.parsed_carrier;
-	if (row.parsed_price_cents && !current.price_cents) patch.price_cents = row.parsed_price_cents;
-	if (row.parsed_order_id && !current.order_id) patch.order_id = row.parsed_order_id;
-	if (row.parsed_amazon_tracking_url && !current.amazon_tracking_url) {
-		patch.amazon_tracking_url = row.parsed_amazon_tracking_url;
-	}
-	if (Object.keys(patch).length > 0) {
-		updateGift(giftId, patch, userId);
+	// td-3e9ae2: an order can fan out to N gifts (multi-recipient case). When
+	// the shipped/delivered email lands, advance every sibling gift under the
+	// same order, not just the one resolveOrCreateGift returned. Falls back
+	// to single-gift behavior when no parent order exists (legacy gifts).
+	const seed = getGiftById(giftId);
+	if (!seed) return;
+	let siblings: Gift[] = [seed];
+	if (seed.order_pk) {
+		const sibs = listGiftsForOrder(seed.order_pk);
+		if (sibs.length > 0) siblings = sibs;
 	}
 
-	// Advance status according to email type if the forward transition is legal.
+	// Refresh order-level tracking on the parent orders row from this email's
+	// fields. Idempotent fill-only via upsertOrderByOrderId.
+	if (row.parsed_order_id) ensureOrderForRow(row, userId);
+
 	const target = lifecycleStatus(row.email_type);
-	if (target) {
-		const now = getGiftById(giftId)!;
-		if (canTransition(now.status, target)) {
-			transitionGift(giftId, target, userId);
+	for (const current of siblings) {
+		// Merge newly-parsed fields that the first email may have missed.
+		const patch: Parameters<typeof updateGift>[1] = {};
+		if (row.parsed_tracking_number && !current.tracking_number) patch.tracking_number = row.parsed_tracking_number;
+		if (row.parsed_carrier && !current.carrier) patch.carrier = row.parsed_carrier;
+		// Don't overwrite per-line price with order total on multi-item orders.
+		if (row.parsed_price_cents && !current.price_cents && !current.order_pk) {
+			patch.price_cents = row.parsed_price_cents;
+		}
+		if (row.parsed_order_id && !current.order_id) patch.order_id = row.parsed_order_id;
+		if (row.parsed_amazon_tracking_url && !current.amazon_tracking_url) {
+			patch.amazon_tracking_url = row.parsed_amazon_tracking_url;
+		}
+		if (Object.keys(patch).length > 0) {
+			updateGift(current.id, patch, userId);
+		}
+
+		if (target) {
+			const fresh = getGiftById(current.id)!;
+			if (canTransition(fresh.status, target)) {
+				transitionGift(current.id, target, userId);
+			}
 		}
 	}
 }
@@ -556,6 +772,21 @@ function lifecycleStatus(t: EmailType): GiftStatus | null {
 	if (t === 'shipped') return 'shipped';
 	if (t === 'delivered') return 'delivered';
 	return null;
+}
+
+/** Read the persisted per-line-item array from an import row, tolerant of
+ * pre-018 rows that have no parsed_items_json. */
+function parseRowItems(row: ImportRow): ParsedAmazonItem[] {
+	if (!row.parsed_items_json) return [];
+	try {
+		const arr = JSON.parse(row.parsed_items_json);
+		if (!Array.isArray(arr)) return [];
+		return arr.filter((x): x is ParsedAmazonItem =>
+			x && typeof x === 'object' && typeof x.title === 'string'
+		);
+	} catch {
+		return [];
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -613,6 +844,108 @@ export function retryFailedByOrderId(runId: number, actorUserId: number): RetryR
 	}
 
 	return { scanned: rows.length, matched };
+}
+
+// ---------------------------------------------------------------------------
+// td-3e9ae2: re-split a previously-collapsed Amazon order.
+//
+// Before the orders/gifts 1:N split, a multi-item Amazon order was imported
+// as one gift keyed by gifts.order_id. The legacy import_row carries the
+// original Gmail message id and may now have an empty parsed_items_json
+// (parsed before the multi-item parser landed).
+//
+// `reImportOrderById` re-fetches the order_placed email, re-runs the new
+// parser, refreshes parsed_items_json + parsed_price_cents on the existing
+// import row, archives the collapsed gift, and flips disposition back to
+// 'pending' so the admin can assign per-line recipients in the review UI.
+
+export interface ReImportResult {
+	orderId: string;
+	rowId: number;
+	itemCount: number;
+	archivedGiftId: number | null;
+	runId: number;
+}
+
+export async function reImportOrderById(
+	orderId: string,
+	userId: number
+): Promise<ReImportResult> {
+	const db = getDb();
+	const row = db
+		.prepare<[string], ImportRow>(
+			`SELECT * FROM import_rows
+			  WHERE parsed_order_id = ?
+			    AND email_type = 'order_placed'
+			  ORDER BY id DESC LIMIT 1`
+		)
+		.get(orderId);
+	if (!row) {
+		throw new Error(`No order_placed import row found for order ${orderId}.`);
+	}
+
+	// Re-fetch the original Gmail message body and re-parse.
+	const msg = await getFullMessage(userId, row.source_message_id);
+	const parsed = parseAmazonEmail(msg);
+	const itemsJson = parsed.items.length > 0 ? JSON.stringify(parsed.items) : null;
+
+	db.prepare(
+		`UPDATE import_rows
+		    SET parsed_items_json = ?,
+		        parsed_title = ?,
+		        parsed_price_cents = ?,
+		        disposition = 'pending',
+		        gift_id = NULL,
+		        match_confidence = ?,
+		        error_message = NULL,
+		        updated_at = CURRENT_TIMESTAMP
+		  WHERE id = ?`
+	).run(
+		itemsJson,
+		parsed.title,
+		parsed.priceCents,
+		row.match_confidence ?? null,
+		row.id
+	);
+
+	// Archive the collapsed gift (if any) so the admin can re-create N gifts
+	// from the review UI. Keep the audit_log breadcrumb so the original is
+	// recoverable via /app/gifts/[id] restore if needed.
+	let archivedGiftId: number | null = null;
+	const collapsed = db
+		.prepare<[string], Gift>(
+			`SELECT * FROM gifts WHERE order_id = ? AND is_archived = 0 ORDER BY id ASC LIMIT 1`
+		)
+		.get(orderId);
+	if (collapsed) {
+		db.prepare(
+			'UPDATE gifts SET is_archived = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+		).run(collapsed.id);
+		archivedGiftId = collapsed.id;
+		logAudit({
+			actorUserId: userId,
+			entityType: 'gift',
+			entityId: collapsed.id,
+			action: 'archive',
+			summary: `Archived collapsed multi-item gift "${collapsed.title}" for re-split (td-3e9ae2)`
+		});
+	}
+
+	logAudit({
+		actorUserId: userId,
+		entityType: 'import',
+		entityId: row.import_run_id,
+		action: 'amazon_re_split',
+		summary: `Re-split order ${orderId} into ${parsed.items.length} line item${parsed.items.length === 1 ? '' : 's'} for review`
+	});
+
+	return {
+		orderId,
+		rowId: row.id,
+		itemCount: parsed.items.length,
+		archivedGiftId,
+		runId: row.import_run_id
+	};
 }
 
 // ---------------------------------------------------------------------------

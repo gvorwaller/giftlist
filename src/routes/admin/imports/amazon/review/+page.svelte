@@ -33,6 +33,20 @@
 	const pending = $derived(data.rows.filter((r) => r.disposition === 'pending'));
 	const handled = $derived(data.rows.filter((r) => r.disposition !== 'pending'));
 
+	// td-3e9ae2: per-row state for the "Apply same recipient to all" shortcut
+	// on multi-item Amazon orders. Map<rowId, applyAll>.
+	let applyAllSelected = $state<Record<number, boolean>>({});
+	let applyAllPerson = $state<Record<number, string>>({});
+	function syncLineItemPickers(rowId: number, count: number) {
+		// When "apply same to all" is on and a person is chosen, set every
+		// line-item picker's value to the same id (visual + form-data).
+		const pid = applyAllPerson[rowId] ?? '';
+		for (let i = 0; i < count; i++) {
+			const el = document.querySelector<HTMLSelectElement>(`select[name="lineperson_${rowId}_${i}"]`);
+			if (el) el.value = pid;
+		}
+	}
+
 	let confirmingSkipAll = $state(false);
 	let expandedHandledRowId = $state<number | null>(null);
 
@@ -123,6 +137,8 @@
 					{@const candidates = parseCandidates(r.match_candidates_json)}
 					{@const giftMatch = data.giftMatches[r.id]}
 					{@const giftCandidates = giftMatch?.candidates ?? []}
+					{@const items = data.rowItems[r.id] ?? []}
+					{@const isMultiItem = items.length > 1}
 					<li class="row-card">
 						<input type="hidden" name="row_id" value={r.id} />
 
@@ -138,7 +154,7 @@
 							<div class="price">{priceDollars(r.parsed_price_cents)}</div>
 						</div>
 
-						{#if r.parsed_title}
+						{#if !isMultiItem && r.parsed_title}
 							<p class="parsed"><span class="label">Item</span> {r.parsed_title}</p>
 						{/if}
 						{#if r.parsed_tracking_number || r.parsed_carrier}
@@ -159,6 +175,95 @@
 							<p class="parsed gift-msg">
 								<span class="label">Gift message</span> {r.parsed_gift_message}
 							</p>
+						{/if}
+
+						{#if isMultiItem}
+							<fieldset class="line-items">
+								<legend>
+									{items.length} line items —
+									<span class="hint">assign each to its recipient (td-3e9ae2)</span>
+								</legend>
+								<label class="apply-all">
+									<input
+										type="checkbox"
+										checked={applyAllSelected[r.id] ?? false}
+										onchange={(e) => {
+											applyAllSelected[r.id] = (e.currentTarget as HTMLInputElement).checked;
+											if (applyAllSelected[r.id]) syncLineItemPickers(r.id, items.length);
+										}}
+									/>
+									<span>Same recipient for all {items.length}</span>
+									{#if applyAllSelected[r.id]}
+										<select
+											class="apply-all-person"
+											bind:value={applyAllPerson[r.id]}
+											onchange={() => syncLineItemPickers(r.id, items.length)}
+										>
+											<option value="">— choose —</option>
+											{#each data.people as p (p.id)}
+												<option value={String(p.id)}>{p.display_name}</option>
+											{/each}
+										</select>
+									{/if}
+								</label>
+								<ul class="line-list">
+									{#each items as it, idx (idx)}
+										{@const lineMatch = data.lineItemMatches[`${r.id}:${idx}`]}
+										<li class="line-li">
+											<div class="line-head">
+												<p class="line-title">{it.title}</p>
+												<p class="line-price">{priceDollarsOrEmpty(it.priceCents ?? null)}</p>
+											</div>
+											<label class="line-pick">
+												<span class="lbl">Recipient</span>
+												<select name="lineperson_{r.id}_{idx}" required>
+													<option value="">— choose —</option>
+													{#each data.people as p (p.id)}
+														<option value={String(p.id)}>{p.display_name}</option>
+													{/each}
+												</select>
+											</label>
+											{#if lineMatch && lineMatch.candidates.length > 0}
+												<fieldset class="line-gift">
+													<legend>
+														Existing
+														{lineMatch.candidates.length === 1 ? 'gift idea' : 'gift ideas'}
+														{#if lineMatch.confidence === 'strong'}
+															<span class="badge strong">strong match</span>
+														{:else}
+															<span class="badge weak">weak match</span>
+														{/if}
+													</legend>
+													<label class="gift-radio">
+														<input
+															type="radio"
+															name="linegift_{r.id}_{idx}"
+															value=""
+															checked={lineMatch.confidence !== 'strong'}
+														/>
+														<span>Don't link — create a new gift</span>
+													</label>
+													{#each lineMatch.candidates as g (g.giftId)}
+														<label class="gift-radio">
+															<input
+																type="radio"
+																name="linegift_{r.id}_{idx}"
+																value={String(g.giftId)}
+																checked={lineMatch.topId === g.giftId}
+															/>
+															<span>
+																<strong>{g.title}</strong>
+																<span class="muted">→ {g.personDisplayName}</span>
+																<span class="score">{Math.round(g.score * 100)}%</span>
+															</span>
+														</label>
+													{/each}
+												</fieldset>
+											{/if}
+										</li>
+									{/each}
+								</ul>
+							</fieldset>
 						{/if}
 
 						<div class="choice-grid">
@@ -189,7 +294,7 @@
 								<span>Leave pending → stays in Inbox, re-surfaces next scan</span>
 							</label>
 
-							{#if giftCandidates.length > 0}
+							{#if giftCandidates.length > 0 && !isMultiItem}
 								<fieldset class="gift-link">
 									<legend>
 										Looks like an existing
@@ -231,28 +336,30 @@
 								</fieldset>
 							{/if}
 
-							<label class="person-select">
-								<span class="label">Or assign to person</span>
-								<select name="person_{r.id}">
-									<option value="">— unassigned —</option>
-									{#each data.people as p (p.id)}
-										<option
-											value={String(p.id)}
-											selected={r.match_person_id === p.id}
-										>
-											{p.display_name}{#if p.full_name && p.full_name !== p.display_name} ({p.full_name}){/if}
-										</option>
-									{/each}
-								</select>
-								{#if r.match_person_id && r.match_confidence}
-									<span class="hint">
-										{r.match_confidence} match
-										{#if candidates.length > 1}
-											· {candidates.length} candidates
-										{/if}
-									</span>
-								{/if}
-							</label>
+							{#if !isMultiItem}
+								<label class="person-select">
+									<span class="label">Or assign to person</span>
+									<select name="person_{r.id}">
+										<option value="">— unassigned —</option>
+										{#each data.people as p (p.id)}
+											<option
+												value={String(p.id)}
+												selected={r.match_person_id === p.id}
+											>
+												{p.display_name}{#if p.full_name && p.full_name !== p.display_name} ({p.full_name}){/if}
+											</option>
+										{/each}
+									</select>
+									{#if r.match_person_id && r.match_confidence}
+										<span class="hint">
+											{r.match_confidence} match
+											{#if candidates.length > 1}
+												· {candidates.length} candidates
+											{/if}
+										</span>
+									{/if}
+								</label>
+							{/if}
 
 							{#if r.parsed_recipient_name && r.match_confidence !== 'exact'}
 								<label class="alias">
@@ -583,6 +690,144 @@
 		display: flex;
 		flex-direction: column;
 		gap: 8px;
+	}
+
+	/* td-3e9ae2: multi-item Amazon order — per-line-item recipient pickers. */
+	.line-items {
+		border: 1px solid var(--amber);
+		background: var(--amber-soft);
+		border-radius: var(--radius-control);
+		padding: 14px 16px;
+		margin: 8px 0 12px;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+	.line-items legend {
+		font-family: var(--font-sans);
+		font-size: 13px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		color: var(--amber);
+		padding: 0 8px;
+	}
+	.line-items legend .hint {
+		font-weight: 400;
+		text-transform: none;
+		letter-spacing: 0;
+		color: var(--muted);
+	}
+	.line-items .apply-all {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		font-family: var(--font-sans);
+		font-size: 14px;
+		color: var(--ink);
+	}
+	.line-items .apply-all input[type='checkbox'] {
+		width: 22px;
+		height: 22px;
+		accent-color: var(--amber);
+	}
+	.line-items .apply-all-person {
+		min-height: 44px;
+		padding: 6px 10px;
+		border-radius: var(--radius-control);
+		border: 1px solid var(--line);
+		background: var(--paper);
+		font-size: 15px;
+	}
+	.line-list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+	.line-li {
+		background: var(--paper);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		padding: 10px 12px;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.line-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		gap: 12px;
+	}
+	.line-title {
+		font-family: var(--font-serif);
+		font-size: 16px;
+		color: var(--ink);
+		margin: 0;
+		flex: 1;
+	}
+	.line-price {
+		font-family: var(--font-sans);
+		font-variant-numeric: tabular-nums;
+		color: var(--muted);
+		margin: 0;
+	}
+	.line-pick {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.line-pick .lbl {
+		font-family: var(--font-sans);
+		font-size: 12px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--muted);
+	}
+	.line-pick select {
+		min-height: 48px;
+		padding: 8px 10px;
+		border-radius: var(--radius-control);
+		border: 1px solid var(--line);
+		background: var(--bg);
+		font-size: 16px;
+	}
+	.line-gift {
+		border: 1px solid var(--green);
+		background: var(--green-soft);
+		border-radius: var(--radius-control);
+		padding: 8px 10px;
+		margin: 0;
+	}
+	.line-gift legend {
+		font-family: var(--font-sans);
+		font-size: 11px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--green);
+		padding: 0 6px;
+	}
+	.line-gift .badge {
+		display: inline-block;
+		padding: 1px 8px;
+		border-radius: var(--radius-pill);
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		margin-left: 6px;
+		text-transform: uppercase;
+	}
+	.line-gift .badge.strong {
+		background: var(--green);
+		color: var(--paper);
+	}
+	.line-gift .badge.weak {
+		background: var(--amber-soft);
+		color: var(--amber);
+		border: 1px solid var(--amber);
 	}
 
 	.gift-link legend {

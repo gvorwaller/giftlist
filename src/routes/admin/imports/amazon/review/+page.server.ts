@@ -11,6 +11,23 @@ import {
 } from '$server/jobs/amazon-import';
 import { matchGiftByTitle, type GiftMatchResult } from '$server/gift-matcher';
 import type { ImportRow } from '$server/types';
+import type { ParsedAmazonItem } from '$server/amazon-parser';
+
+/** Parsed `import_rows.parsed_items_json` from the multi-item Amazon parser
+ * (td-3e9ae2). One entry per Amazon line item; null/missing JSON means a
+ * single-item or pre-migration row. */
+function parseItems(json: string | null): ParsedAmazonItem[] {
+	if (!json) return [];
+	try {
+		const arr = JSON.parse(json);
+		if (!Array.isArray(arr)) return [];
+		return arr.filter((x): x is ParsedAmazonItem =>
+			x && typeof x === 'object' && typeof x.title === 'string'
+		);
+	} catch {
+		return [];
+	}
+}
 
 export const load: PageServerLoad = ({ locals, url }) => {
 	if (!locals.user) throw redirect(303, '/login');
@@ -45,13 +62,31 @@ export const load: PageServerLoad = ({ locals, url }) => {
 	// a new one. Modern Amazon emails strip recipient + gift designation, so
 	// title-match is often the only reliable signal.
 	const giftMatches: Record<number, GiftMatchResult> = {};
+	// td-3e9ae2: per-row line-item arrays. Multi-item rows render N pickers
+	// in the UI; single-item rows fall back to the legacy single picker.
+	const rowItems: Record<number, ParsedAmazonItem[]> = {};
+	// td-3e9ae2: per-line-item weak match. Each item gets its own search
+	// against existing idea/planned gifts, keyed by row id + item index.
+	const lineItemMatches: Record<string, GiftMatchResult> = {};
 	for (const r of rows) {
+		const items = parseItems(r.parsed_items_json);
+		if (items.length > 0) rowItems[r.id] = items;
 		if (r.disposition === 'pending' && r.parsed_title) {
 			giftMatches[r.id] = matchGiftByTitle(r.parsed_title);
+			// For multi-item rows, also fuzzy-match each line item independently
+			// — the legacy giftMatches[r.id] uses parsed_title (= first item),
+			// which would otherwise hide candidate matches for items 2..N.
+			if (items.length > 1) {
+				items.forEach((it, idx) => {
+					if (it.title) {
+						lineItemMatches[`${r.id}:${idx}`] = matchGiftByTitle(it.title);
+					}
+				});
+			}
 		}
 	}
 
-	return { run, rows, people, giftMatches };
+	return { run, rows, people, giftMatches, rowItems, lineItemMatches };
 };
 
 function parseDecisions(fd: FormData): CommitRowInput[] {
@@ -73,6 +108,32 @@ function parseDecisions(fd: FormData): CommitRowInput[] {
 			continue;
 		}
 		if (dispositionRaw === 'accept') {
+			// td-3e9ae2: collect per-line-item recipient picks (`lineperson_<row>_<idx>`).
+			// Form field naming: name="lineperson_42_0" value="<personId>". Items left
+			// at the empty default fall through to the legacy single-recipient picker.
+			const lineItems: NonNullable<CommitRowInput['lineItems']> = [];
+			const linePrefix = `lineperson_${rowId}_`;
+			const giftPrefix = `linegift_${rowId}_`;
+			for (const [key, val] of fd.entries()) {
+				if (!key.startsWith(linePrefix)) continue;
+				const idx = Number(key.slice(linePrefix.length));
+				if (!Number.isFinite(idx) || idx < 0) continue;
+				const pid = Number(val);
+				const linkedGiftRaw = fd.get(`${giftPrefix}${idx}`);
+				const linkedGift = linkedGiftRaw ? Number(linkedGiftRaw) : 0;
+				if (Number.isFinite(pid) && pid > 0) {
+					lineItems.push({
+						lineItemIndex: idx,
+						assignedPersonId: pid,
+						assignedGiftId:
+							Number.isFinite(linkedGift) && linkedGift > 0 ? linkedGift : undefined
+					});
+				}
+			}
+			// Keep items in index order so the gifts created are in the same
+			// order shown in the UI (and the same order the parser emitted).
+			lineItems.sort((a, b) => a.lineItemIndex - b.lineItemIndex);
+
 			decisions.push({
 				rowId,
 				action: 'accept',
@@ -80,7 +141,8 @@ function parseDecisions(fd: FormData): CommitRowInput[] {
 					Number.isFinite(assignedPerson) && assignedPerson > 0 ? assignedPerson : undefined,
 				assignedGiftId:
 					Number.isFinite(assignedGift) && assignedGift > 0 ? assignedGift : undefined,
-				saveAsAlias
+				saveAsAlias,
+				lineItems: lineItems.length > 0 ? lineItems : undefined
 			});
 		}
 	}

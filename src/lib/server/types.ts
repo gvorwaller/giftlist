@@ -91,6 +91,36 @@ export interface Gift {
 	tracking_estimated_delivery: string | null;
 	tracking_provider_id: string | null;
 	amazon_tracking_url: string | null;
+	/** td-3e9ae2: FK to parent orders row when this gift was created from an
+	 * Amazon import. Null for manually-entered gifts. */
+	order_pk: number | null;
+	/** td-3e9ae2: 0..N-1 position within a multi-item Amazon order. */
+	line_item_index: number | null;
+	created_at: string;
+	updated_at: string;
+}
+
+/** td-3e9ae2: one row per real-world Amazon order. Owns the order-level
+ * tracking + lifecycle facts that used to be denormalized onto each gift.
+ * Gifts FK back via `gifts.order_pk`. */
+export interface Order {
+	id: number;
+	order_id: string;
+	vendor_id: number | null;
+	shipper_id: number | null;
+	order_total_cents: number | null;
+	tracking_number: string | null;
+	carrier: string | null;
+	tracking_provider_id: string | null;
+	tracking_status: string | null;
+	tracking_status_at: string | null;
+	tracking_estimated_delivery: string | null;
+	amazon_tracking_url: string | null;
+	ordered_at: string | null;
+	shipped_at: string | null;
+	delivered_at: string | null;
+	source_message_id: string | null;
+	notes: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -213,6 +243,10 @@ export interface ImportRow {
 	parsed_gift_message: string | null;
 	parsed_sender_domain: string | null;
 	parsed_amazon_tracking_url: string | null;
+	/** td-3e9ae2: JSON array of per-line-item breakdowns
+	 * `[{title, priceCents, quantity}, ...]`. Null on legacy single-item rows
+	 * and on non-gift emails — caller falls back to parsed_title. */
+	parsed_items_json: string | null;
 	match_person_id: number | null;
 	match_confidence: MatchConfidence | null;
 	match_candidates_json: string | null;

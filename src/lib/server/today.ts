@@ -1,10 +1,11 @@
 import { getDb } from './db';
-import { nextOccurrenceDate } from './occasions';
+import { nextOccurrenceDate, todayMidnightUTC } from './occasions';
 import { getFreshDraft } from './drafts';
 import { listSkipsWithContext, loadSkipSet, skipKey, type SkipWithContext } from './occasion-skips';
 import type {
 	Draft,
 	Gift,
+	GiftStatus,
 	Occasion,
 	Person,
 	PersonOccasion,
@@ -23,6 +24,10 @@ export interface UpcomingOccasion {
 	occasionYear: number;
 	turnsAge: number | null;
 	hasHandledGift: boolean;
+	/** Most-progressed open gift for this (person, occasion). Null when no
+	 * non-archived gift exists or only an 'idea' exists. Surfaced as a
+	 * status pill on /app/today's "Coming up soon" rows. td-8de343. */
+	bestGiftStatus: GiftStatus | null;
 }
 
 export interface TodayData {
@@ -79,8 +84,7 @@ function loadUpcomingWindow(daysAhead: number): UpcomingOccasion[] {
 	// next year's birthday is unaffected by this year's skip.
 	const skips = loadSkipSet();
 
-	const now = new Date();
-	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+	const today = todayMidnightUTC();
 	const cutoff = today.getTime() + daysAhead * 86_400_000;
 
 	const out: UpcomingOccasion[] = [];
@@ -118,36 +122,53 @@ function loadUpcomingWindow(daysAhead: number): UpcomingOccasion[] {
 			daysUntil,
 			occasionYear: occurrenceYear,
 			turnsAge,
-			hasHandledGift: false
+			hasHandledGift: false,
+			bestGiftStatus: null
 		});
 	}
 	out.sort((a, b) => a.daysUntil - b.daysUntil);
 	return out;
 }
 
-function markHandled(occasions: UpcomingOccasion[]): void {
+/** Annotate each upcoming row with handled-gift state and the most-progressed
+ * open status. One DB roundtrip per row: returns the top status by lifecycle
+ * priority (given > returned > wrapped > delivered > shipped > ordered >
+ * planned > idea). td-8de343 added bestGiftStatus; hasHandledGift retains
+ * the Today filter semantics (given/returned only). */
+function annotateGiftState(occasions: UpcomingOccasion[]): void {
 	if (occasions.length === 0) return;
 	const db = getDb();
-	const handledList = Array.from(HANDLED_STATUSES);
-	const stmt = db.prepare<
-		[number, number, ...string[]],
-		{ cnt: number }
-	>(
-		`SELECT COUNT(*) AS cnt FROM gifts
+	const stmt = db.prepare<[number, number], { status: GiftStatus }>(
+		`SELECT status FROM gifts
 		  WHERE is_archived = 0
 		    AND person_id = ?
 		    AND occasion_id = ?
-		    AND status IN (${handledList.map(() => '?').join(',')})`
+		  ORDER BY
+		    CASE status
+		      WHEN 'given' THEN 1
+		      WHEN 'returned' THEN 2
+		      WHEN 'wrapped' THEN 3
+		      WHEN 'delivered' THEN 4
+		      WHEN 'shipped' THEN 5
+		      WHEN 'ordered' THEN 6
+		      WHEN 'planned' THEN 7
+		      WHEN 'idea' THEN 8
+		      ELSE 9
+		    END
+		  LIMIT 1`
 	);
 	for (const o of occasions) {
-		const row = stmt.get(o.personId, o.occasionId, ...handledList);
-		o.hasHandledGift = Boolean(row && row.cnt > 0);
+		const row = stmt.get(o.personId, o.occasionId);
+		if (!row) continue;
+		o.hasHandledGift = HANDLED_STATUSES.has(row.status);
+		// 'idea' isn't a committed gift — don't surface a pill for brainstorming.
+		o.bestGiftStatus = row.status === 'idea' ? null : row.status;
 	}
 }
 
 export function loadTodayData(userId: number): TodayData {
 	const upcoming = loadUpcomingWindow(60);
-	markHandled(upcoming);
+	annotateGiftState(upcoming);
 
 	const needsAttention = upcoming.filter((o) => !o.hasHandledGift);
 	const nextBestAction = needsAttention[0] ?? null;

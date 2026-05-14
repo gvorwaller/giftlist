@@ -1,7 +1,7 @@
 import { getDb } from './db';
 import type { Gift, Occasion, Person, PersonOccasion } from './types';
 import { logAudit } from './audit';
-import { nextOccurrenceDate } from './occasions';
+import { nextOccurrenceDate, todayMidnightUTC } from './occasions';
 
 export interface PersonUpsertInput {
 	display_name: string;
@@ -375,8 +375,7 @@ function computeNextOccasionForPerson(personId: number): NextOccasion | null {
 
 	if (rows.length === 0) return null;
 
-	const now = new Date();
-	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+	const today = todayMidnightUTC();
 
 	let best: NextOccasion | null = null;
 	for (const row of rows) {

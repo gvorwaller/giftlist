@@ -11,6 +11,12 @@ import type { GmailMessageFull } from './gmail-reader';
  * Giftlist/Amazon/Inbox during Phase 4 verification.
  */
 
+export interface ParsedAmazonItem {
+	title: string;
+	priceCents: number | null;
+	quantity: number;
+}
+
 export interface ParsedAmazonEmail {
 	emailType: EmailType;
 	title: string | null;
@@ -29,6 +35,17 @@ export interface ParsedAmazonEmail {
 	 * `shipped` and `delivered` email types.
 	 */
 	trackingUrl: string | null;
+	/**
+	 * td-3e9ae2: per-line-item breakdown. An order with N line items going to
+	 * N recipients yields N entries here. `title`/`priceCents` continue to
+	 * carry the first item's title and the order total for backward compat,
+	 * but the review UI reads `items` to render N recipient pickers.
+	 *
+	 * For single-item orders this contains exactly one entry. May be empty
+	 * for non-gift emails (marketing/review_request) or when the body's bullet
+	 * structure didn't match — caller should fall back to the legacy `title`.
+	 */
+	items: ParsedAmazonItem[];
 }
 
 const MARKETING_SUBJECT_HINTS = [
@@ -89,6 +106,54 @@ function extractTitleFromBody(body: string): string | null {
 	const m = body.match(/^\*\s+([^\n]{5,500})\n\s+Quantity:\s*\d+/m);
 	if (!m) return null;
 	return m[1].replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * td-3e9ae2: extract every line item from the email body, not just the first.
+ *
+ * Amazon's bullet structure repeats per item:
+ *
+ *   * <Title>
+ *     Quantity: N
+ *     $X.YY
+ *
+ * with variable whitespace and an optional currency suffix. Some templates
+ * inline the price on the Quantity line. We accept either form. The price
+ * is per-line-item (Amazon multiplies internally for Quantity > 1, but the
+ * displayed value is what the manager actually paid for that line).
+ */
+function extractItemsFromBody(body: string): ParsedAmazonItem[] {
+	// Two-pass extraction: first find every `* TITLE / Quantity: N` header and
+	// its end offset; then, in pass two, look for a `$X.XX` per-item price ONLY
+	// within the slice between this header and the next one. A single global
+	// regex with an optional price tail backtracks across item boundaries on
+	// items without an inline price, swallowing later items entirely.
+	type Header = { title: string; quantity: number; bodyStart: number; bodyEnd: number };
+	const headers: Header[] = [];
+	const headerRe = /^\*\s+([^\n]{5,500})\n\s+Quantity:\s*(\d+)/gm;
+	let h: RegExpExecArray | null;
+	while ((h = headerRe.exec(body)) !== null) {
+		const title = h[1].replace(/\s+/g, ' ').trim();
+		if (!title) continue;
+		const quantity = Number.parseInt(h[2], 10);
+		headers.push({
+			title,
+			quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+			bodyStart: h.index + h[0].length,
+			bodyEnd: -1
+		});
+		if (headers.length >= 50) break;
+	}
+	for (let i = 0; i < headers.length; i++) {
+		headers[i].bodyEnd = i + 1 < headers.length ? headers[i + 1].bodyStart : body.length;
+	}
+	return headers.map((hdr) => {
+		const segment = body.slice(hdr.bodyStart, hdr.bodyEnd);
+		// First $XX.XX inside the segment is the per-item price.
+		const priceMatch = segment.match(/\$([0-9]+(?:\.[0-9]{2}))(?:\s*USD)?/);
+		const priceCents = priceMatch ? Math.round(parseFloat(priceMatch[1]) * 100) : null;
+		return { title: hdr.title, priceCents, quantity: hdr.quantity };
+	});
 }
 
 function extractOrderId(body: string): string | null {
@@ -318,12 +383,15 @@ export function parseAmazonEmail(msg: GmailMessageFull): ParsedAmazonEmail {
 			recipientName: null,
 			shippingAddress: null,
 			giftMessage: null,
-			trackingUrl: null
+			trackingUrl: null,
+			items: []
 		};
 	}
 
-	// Body bullet has the full untruncated title; subject is ellipsis-truncated.
-	const title = extractTitleFromBody(body) ?? extractTitleFromSubject(subject);
+	// td-3e9ae2: multi-item extraction. `items` is the source of truth for the
+	// new review UI; `title` continues to expose the first item for legacy paths.
+	const items = extractItemsFromBody(body);
+	const title = items[0]?.title ?? extractTitleFromBody(body) ?? extractTitleFromSubject(subject);
 	const orderId = extractOrderId(body);
 	const priceCents = extractPriceCents(body);
 	const { tracking, carrier } = extractTracking(body);
@@ -350,6 +418,7 @@ export function parseAmazonEmail(msg: GmailMessageFull): ParsedAmazonEmail {
 		recipientName,
 		shippingAddress,
 		giftMessage,
-		trackingUrl
+		trackingUrl,
+		items
 	};
 }

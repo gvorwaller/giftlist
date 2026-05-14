@@ -6,6 +6,7 @@ import {
 	getLatestRun,
 	listRecentRuns,
 	listRowsForRun,
+	reImportOrderById,
 	runAmazonScan
 } from '$server/jobs/amazon-import';
 
@@ -66,6 +67,29 @@ export const actions: Actions = {
 			if (err instanceof Response || (err as { status?: number })?.status === 303) throw err;
 			const message = err instanceof Error ? err.message : String(err);
 			return fail(409, { error: message });
+		}
+	},
+
+	// td-3e9ae2: re-import a previously-collapsed multi-item Amazon order.
+	// Archives the existing single gift and flips the order_placed import row
+	// back to disposition='pending' with refreshed parsed_items_json so the
+	// admin can assign N recipients in the review UI. Idempotent — safe to
+	// re-run if the first attempt fails partway through.
+	reSplit: async ({ locals, request }) => {
+		if (!locals.user) throw redirect(303, '/login');
+		const fd = await request.formData();
+		const orderId = String(fd.get('order_id') ?? '').trim();
+		if (!orderId) return fail(400, { error: 'Order ID required.' });
+		try {
+			const result = await reImportOrderById(orderId, locals.user.id);
+			throw redirect(
+				303,
+				`/admin/imports/amazon/review?run=${result.runId}&resplit=${result.itemCount}`
+			);
+		} catch (err) {
+			if (err instanceof Response || (err as { status?: number })?.status === 303) throw err;
+			const message = err instanceof Error ? err.message : String(err);
+			return fail(409, { error: `Re-split failed: ${message}` });
 		}
 	}
 };

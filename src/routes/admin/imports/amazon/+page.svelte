@@ -94,6 +94,33 @@
 			</p>
 		</section>
 
+		<!-- td-3e9ae2: re-split a previously collapsed multi-item Amazon order. -->
+		<section class="card">
+			<p class="eyebrow">Re-split a collapsed order</p>
+			<p class="body">
+				Before the multi-recipient fix, a multi-item Amazon order was imported as a single gift.
+				Paste the order # below to re-fetch the email, archive the collapsed gift, and re-stage
+				the order_placed row for per-line-item review.
+			</p>
+			<form method="POST" action="?/reSplit" class="scan-form">
+				<label class="batch">
+					<span>Order #</span>
+					<input
+						type="text"
+						name="order_id"
+						placeholder="113-2234245-9301002"
+						pattern="[0-9]{'{'}3{'}'}-[0-9]{'{'}7{'}'}-[0-9]{'{'}7{'}'}"
+						required
+					/>
+				</label>
+				<button type="submit" class="ghost">Re-split for review</button>
+			</form>
+			<p class="muted">
+				Idempotent — running twice for the same order_id just re-stages the row again. The
+				archived gift can be Restored from its detail page if you change your mind.
+			</p>
+		</section>
+
 		{#if data.recentRuns.length > 1}
 			<section class="card">
 				<p class="eyebrow">Recent runs ({data.recentRuns.length})</p>

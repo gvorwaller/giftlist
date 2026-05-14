@@ -23,6 +23,11 @@ export interface GiftCreateInput {
 	vendor_id?: number | null;
 	shipper_id?: number | null;
 	amazon_tracking_url?: string | null;
+	/** td-3e9ae2: FK to the parent orders row. Set for any gift created from
+	 * an Amazon import (single- or multi-item). Null for manual entries. */
+	order_pk?: number | null;
+	/** td-3e9ae2: 0..N-1 position within a multi-item order; 0 for single-item. */
+	line_item_index?: number | null;
 }
 
 export interface GiftUpdateInput {
@@ -131,8 +136,8 @@ export function createGift(input: GiftCreateInput, actorUserId: number): Gift {
 			`INSERT INTO gifts (
 			   person_id, occasion_id, occasion_year, title, source, source_url,
 			   order_id, tracking_number, carrier, price_cents, status, notes, is_idea,
-			   vendor_id, shipper_id, amazon_tracking_url
-			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			   vendor_id, shipper_id, amazon_tracking_url, order_pk, line_item_index
+			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.run(
 			input.person_id,
@@ -150,7 +155,9 @@ export function createGift(input: GiftCreateInput, actorUserId: number): Gift {
 			is_idea,
 			vendor_id,
 			shipper_id,
-			input.amazon_tracking_url ?? null
+			input.amazon_tracking_url ?? null,
+			input.order_pk ?? null,
+			input.line_item_index ?? null
 		);
 	const id = Number(info.lastInsertRowid);
 	const gift = getGiftById(id)!;

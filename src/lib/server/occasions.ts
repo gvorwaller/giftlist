@@ -254,15 +254,21 @@ export function listPersonOccasions(personId: number): OccasionWithLink[] {
 /**
  * Returns the next occurrence Date for the given occasion (annual or one_time).
  * Returns null if a one_time occasion is already in the past.
+ *
+ * td-68e82a: anchored at noon UTC. Production runs in UTC; if we used local
+ * midnight, JSON.stringify would emit e.g. `2026-12-07T00:00:00.000Z` which
+ * a US Eastern browser renders as "Sunday, December 6" — one day early.
+ * Noon UTC is the same calendar date in every timezone from UTC-11 to UTC+11.
  */
 export function nextOccurrenceDate(occasion: Occasion, today: Date = new Date()): Date | null {
 	if (occasion.recurrence === 'one_time') {
 		if (!occasion.date) return null;
-		const d = new Date(occasion.date + 'T00:00:00');
-		if (d.getTime() < new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) {
-			return null;
-		}
-		return d;
+		const [y, m, d] = occasion.date.split('-').map(Number);
+		if (!y || !m || !d) return null;
+		const candidate = new Date(Date.UTC(y, m - 1, d, 12));
+		const todayStart = todayMidnightUTC(today);
+		if (candidate.getTime() < todayStart.getTime()) return null;
+		return candidate;
 	}
 
 	// annual
@@ -270,12 +276,20 @@ export function nextOccurrenceDate(occasion: Occasion, today: Date = new Date())
 	const day = occasion.day;
 	if (month == null || day == null) return null;
 
-	const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-	let candidate = new Date(today.getFullYear(), month - 1, day);
+	const todayStart = todayMidnightUTC(today);
+	let candidate = new Date(Date.UTC(today.getFullYear(), month - 1, day, 12));
 	if (candidate.getTime() < todayStart.getTime()) {
-		candidate = new Date(today.getFullYear() + 1, month - 1, day);
+		candidate = new Date(Date.UTC(today.getFullYear() + 1, month - 1, day, 12));
 	}
 	return candidate;
+}
+
+/**
+ * Today's calendar date anchored at noon UTC — same calendar date in any US
+ * timezone after JSON serialization. td-68e82a.
+ */
+export function todayMidnightUTC(today: Date = new Date()): Date {
+	return new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 12));
 }
 
 /** Human-friendly formatter for a Date in the local calendar. */

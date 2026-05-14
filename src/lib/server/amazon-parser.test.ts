@@ -71,6 +71,94 @@ describe('extractAmazonTrackingUrl', () => {
 	});
 });
 
+describe('parseAmazonEmail multi-item extraction (td-3e9ae2)', () => {
+	it('parses a single-item order_placed email into a one-entry items array', () => {
+		const body = [
+			'Order #113-1111111-1111111',
+			'',
+			'* Cool Thing With A Long Title That Survives Subject Truncation',
+			'  Quantity: 1',
+			'  $24.99',
+			'',
+			'Order total: $24.99'
+		].join('\n');
+		const result = parseAmazonEmail(
+			msg({
+				subject: 'Your Amazon.com order has been placed',
+				bodyText: body
+			})
+		);
+		expect(result.items.length).toBe(1);
+		expect(result.items[0].title).toContain('Cool Thing');
+		expect(result.items[0].priceCents).toBe(2499);
+		expect(result.items[0].quantity).toBe(1);
+		expect(result.title).toContain('Cool Thing');
+	});
+
+	it('parses a four-item order (the td-3e9ae2 reproducer: order #113-2234245-9301002)', () => {
+		const body = [
+			'Order #113-2234245-9301002',
+			'',
+			'* Graduation Card For The Graduate',
+			'  Quantity: 1',
+			'  $4.99',
+			'',
+			'* MasterCard Gift Card',
+			'  Quantity: 1',
+			'  $54.95',
+			'',
+			'* Hallmark Card',
+			'  Quantity: 1',
+			'  $5.99',
+			'',
+			'* MasterCard Gift Card',
+			'  Quantity: 1',
+			'  $105.95',
+			'',
+			'Order total: $171.88'
+		].join('\n');
+		const result = parseAmazonEmail(
+			msg({
+				subject: 'Your Amazon.com order has been placed',
+				bodyText: body
+			})
+		);
+		expect(result.items.length).toBe(4);
+		expect(result.items.map((i) => i.priceCents)).toEqual([499, 5495, 599, 10595]);
+		// Order total stays in priceCents for backward compat.
+		expect(result.priceCents).toBe(17188);
+	});
+
+	it('returns an empty items array on marketing emails', () => {
+		const result = parseAmazonEmail(
+			msg({
+				subject: "Today's Deals are here",
+				bodyText: '* Some promo bullet\n  Quantity: 1\n  $9.99'
+			})
+		);
+		expect(result.items).toEqual([]);
+	});
+
+	it('tolerates a missing inline price by leaving priceCents null on that item', () => {
+		const body = [
+			'* Item Without Inline Price Bullet',
+			'  Quantity: 2',
+			'  Some other line',
+			'',
+			'* Item With Inline Price',
+			'  Quantity: 1',
+			'  $12.50'
+		].join('\n');
+		const result = parseAmazonEmail(
+			msg({ subject: 'Shipped: "x"', bodyText: body })
+		);
+		expect(result.items.length).toBe(2);
+		expect(result.items[0].priceCents).toBeNull();
+		expect(result.items[0].quantity).toBe(2);
+		expect(result.items[1].priceCents).toBe(1250);
+	});
+});
+
 describe('parseAmazonEmail trackingUrl wiring', () => {
 	it('populates trackingUrl on shipped emails', () => {
 		const result = parseAmazonEmail(

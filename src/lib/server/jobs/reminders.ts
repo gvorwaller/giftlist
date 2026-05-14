@@ -1,7 +1,7 @@
 import { getDb } from '../db';
 import { runJob, type JobResult } from './runner';
 import { deliverNotification, type ChannelResult } from '../notify';
-import { nextOccurrenceDate } from '../occasions';
+import { nextOccurrenceDate, todayMidnightUTC } from '../occasions';
 import { loadSkipSet, skipKey } from '../occasion-skips';
 import type { Gift, Occasion, Person, PersonOccasion } from '../types';
 
@@ -48,11 +48,26 @@ export interface ReminderSummary {
 	notifiedSubject: string;
 }
 
-// "Handled" for digest purposes = the gift is closed out — handed over
-// (given) or abandoned (returned). Anything earlier in the lifecycle —
-// planned/ordered/shipped/delivered/wrapped — keeps the person in the
-// digest so we don't fall silent before they actually receive it. td-9a7c2e.
-const HANDLED_STATUSES: ReadonlySet<string> = new Set(['given', 'returned']);
+// "Committed" for digest purposes = the gift manager has acted. Any status
+// past 'idea' counts — planned/ordered/shipped/delivered/wrapped/given/
+// returned. The needsAttention bucket is for occasions where the manager
+// has NOT yet committed; those get the "No gift is marked bought yet" line.
+// Previously this set was {given, returned} only, which falsely flagged
+// already-bought-but-not-yet-given gifts as needing attention. td-0c8de5.
+//
+// Note: 'comingUp' (the heads-up bucket) keeps showing every committed
+// occasion through delivery so the manager doesn't fall silent before the
+// gift actually arrives — that's the per-row UpcomingItem stream, not this
+// boolean split. td-9a7c2e.
+const HANDLED_STATUSES: ReadonlySet<string> = new Set([
+	'planned',
+	'ordered',
+	'shipped',
+	'delivered',
+	'wrapped',
+	'given',
+	'returned'
+]);
 
 function getConfiguredLeadDays(): number {
 	const fromEnv = Number(process.env.REMINDER_LEAD_DAYS);
@@ -143,8 +158,7 @@ function collectUpcoming(leadDays: number): UpcomingItem[] {
 		)
 		.all();
 
-	const today = new Date();
-	const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+	const todayStart = todayMidnightUTC();
 	// td-927a2d: skipped iterations are dropped from the digest the same way
 	// they're dropped from /app/today.
 	const skips = loadSkipSet();

@@ -2,6 +2,15 @@
 	import { page } from '$app/stores';
 	import type { PageData } from './$types';
 	import { managerLabel } from '$lib/gift-status';
+	import type { GiftStatus } from '$server/types';
+
+	// Tone groups the seven lifecycle statuses into three accessible pill
+	// colors. Label text is always present (never color-alone). td-8de343.
+	function statusTone(s: GiftStatus): 'bought' | 'ready' | 'idea' {
+		if (s === 'wrapped' || s === 'delivered' || s === 'given') return 'ready';
+		if (s === 'planned') return 'idea';
+		return 'bought'; // ordered, shipped, returned
+	}
 
 	interface Props {
 		data: PageData;
@@ -138,6 +147,8 @@
 							</div>
 							{#if o.hasHandledGift}
 								<span class="pill done">Gift handled</span>
+							{:else if o.bestGiftStatus}
+								<span class="pill {statusTone(o.bestGiftStatus)}">{managerLabel(o.bestGiftStatus)}</span>
 							{/if}
 						</a>
 						<form method="POST" action="?/skip" class="skip-form-inline">
@@ -388,9 +399,21 @@
 		color: var(--green);
 	}
 
-	.pill.attention {
+	.pill.attention,
+	.pill.bought {
 		background: var(--amber-soft);
 		color: var(--amber);
+	}
+
+	.pill.ready {
+		background: var(--green-soft);
+		color: var(--green);
+	}
+
+	.pill.idea {
+		background: var(--bg);
+		color: var(--muted);
+		border: 1px solid var(--line);
 	}
 
 	.recent-list li {
