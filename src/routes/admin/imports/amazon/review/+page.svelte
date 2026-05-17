@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page } from '$app/stores';
 	import type { ActionData, PageData } from './$types';
 	import PersonPicker from '$lib/components/PersonPicker.svelte';
@@ -37,21 +38,28 @@
 	// td-3e9ae2 / td-77a119: per-row state for the "Apply same recipient to all"
 	// shortcut + the per-line-item recipient pickers. State-driven (was
 	// DOM-driven against native <select>) so the new PersonPicker combobox
-	// works without manual DOM access.
-	let applyAllSelected = $state<Record<number, boolean>>({});
-	let applyAllPerson = $state<Record<number, number | null>>({});
-	let lineSelections = $state<Record<string, number | null>>({}); // key = `${rowId}:${idx}`
-	let singleSelections = $state<Record<number, number | null>>({}); // key = rowId
-
-	// Seed singleSelections from each row's existing match_person_id so the
-	// PersonPicker shows the importer's auto-match suggestion on first render.
-	$effect(() => {
-		for (const row of data.rows) {
-			if (singleSelections[row.id] === undefined) {
-				singleSelections[row.id] = row.match_person_id ?? null;
-			}
-		}
-	});
+	// works without manual DOM access. Eagerly seed every key — PersonPicker's
+	// `value` prop is typed `number | null`; a dictionary lookup that returns
+	// `undefined` throws Svelte 5 `props_invalid_value` during hydration, which
+	// silently aborts client-side SvelteKit navigation into this route.
+	let applyAllSelected = $state<Record<number, boolean>>(
+		untrack(() => Object.fromEntries(data.rows.map((r) => [r.id, false])))
+	);
+	let applyAllPerson = $state<Record<number, number | null>>(
+		untrack(() => Object.fromEntries(data.rows.map((r) => [r.id, null])))
+	);
+	let lineSelections = $state<Record<string, number | null>>(
+		untrack(() =>
+			Object.fromEntries(
+				data.rows.flatMap((r) =>
+					(data.rowItems[r.id] ?? []).map((_, i) => [`${r.id}:${i}`, null] as const)
+				)
+			)
+		)
+	); // key = `${rowId}:${idx}`
+	let singleSelections = $state<Record<number, number | null>>(
+		untrack(() => Object.fromEntries(data.rows.map((r) => [r.id, r.match_person_id ?? null])))
+	); // key = rowId
 
 	function syncLineItemPickers(rowId: number, count: number) {
 		// When "apply same to all" is on and a person is chosen, propagate
