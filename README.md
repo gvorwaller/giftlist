@@ -14,6 +14,7 @@ Live at **<https://gifts.gaylon.photos>**.
 - **argon2id** password hashing, server-side sessions, `SameSite=Lax` cookies
 - **Google OAuth2** (Gmail + People API) for Contacts import and email-driven gift / package import
 - **Shippo** tracking API for carrier registration + webhook checkpoints (URL-token auth, pay-as-you-go ~$0.01/registration)
+- **Anthropic Haiku 4.5** (optional, via `ANTHROPIC_API_KEY`) for semantic confirmation of weak gift-match suggestions on the Amazon-review screen; cached per (item, candidate-set) so re-runs are free
 - **node-cron** in-process scheduler (env-guarded; only runs when `NODE_ENV=production AND ENABLE_CRON=true`)
 - **PM2** for process management on a shared DigitalOcean droplet behind Nginx + Cloudflare (Flexible SSL)
 - **Telegram + nodemailer** for daily digest delivery
@@ -29,10 +30,12 @@ Accessibility is a core constraint, not a polish item — Lighthouse 100/100/100
 - Gift history per person, grouped by year — scan past Christmases to avoid duplicates
 - Daily reminder digest via Telegram + email, including pending-import counts
 - **Two email-import pipelines** (admin gates every commit):
-  - **Amazon**: `Giftlist/Amazon/Inbox` → parses Amazon order/shipped/delivered emails → recipient match → gift create/advance
-  - **Tracking**: `Giftlist/Tracking/Inbox` → parses non-Amazon shipment confirmations (UPS / USPS / FedEx / DHL / OnTrac / Lasership / Canada Post) → either links to existing gift or creates a self-package with Shippo registration
+  - **Amazon**: `Giftlist/Amazon/Inbox` → parses Amazon order/shipped/delivered emails → recipient match → gift create/advance. Multi-recipient orders model partial shipments via `order_shipments` so only the boxed-up siblings advance status per shipping notification.
+  - **Tracking**: `Giftlist/Tracking/Inbox` → parses non-Amazon shipment confirmations (UPS / USPS / FedEx / DHL / OnTrac / Lasership / Canada Post) → either links to existing gift, routes ambiguous order# matches to a manual review queue, or creates a self-package with Shippo registration
+- **Match-quality safety net** — lexical matcher (stopwords + anchor-token gate) plus an optional LLM second-pass for weak candidates; admin sees an "AI confirmed / AI rejected" badge inline
+- **Searchable recipient picker** — type-to-filter combobox on every "for who?" field (gift forms + Amazon review per-line-item pickers)
 - Personal (non-gift) packages — `is_self` people scoped per-owner so manager and admin only see their own
-- Soft-delete with reachable Restore button + visible archived gifts under "Past gifts" history
+- Soft-delete with reachable Restore button + visible archived gifts under "Past gifts" history per person, plus `/admin/system/archived` for cross-person browsing with chronological sort
 - Today list keeps people surfaced until the gift is *given* (not just delivered) so wrapped-but-not-handed-over stays visible
 
 ## Local development
@@ -95,12 +98,14 @@ CCC pre-flight runs this before uploading the directory to the NAS.
 
 | Concern | File |
 |---|---|
-| Schema | `migrations/*.sql` (currently at v15) |
+| Schema | `migrations/*.sql` (currently at v22) |
 | Migration runner (FK choreography) | `src/lib/server/migrate.ts` |
 | Type definitions | `src/lib/server/types.ts` |
 | Auth | `src/lib/server/{auth,session}.ts` |
 | Job orchestration | `src/lib/server/jobs/{runner,reminders,amazon-import,tracking-import,tracking-refresh,christmas-kickoff,backup}.ts` |
 | Email parsers | `src/lib/server/{amazon-parser,shipment-parser}.ts` |
+| Gift / line-item matcher | `src/lib/server/{gift-matcher,matcher-llm}.ts` (Phase A heuristic + cached Haiku second-pass) |
+| Order / shipment helpers | `src/lib/server/orders.ts` (`upsertOrderByOrderId`, `upsertShipment`, `matchSiblingsToShipment`) |
 | Tracking provider integration | `src/lib/server/tracking.ts` (+ webhook at `/api/tracking/shippo`) |
 | Gmail reader | `src/lib/server/gmail-reader.ts` |
 | Notification channels | `src/lib/server/{notify,notify-email,notify-telegram}.ts` |
@@ -109,6 +114,7 @@ CCC pre-flight runs this before uploading the directory to the NAS.
 | Occasion management | `src/lib/server/occasions.ts`, `/admin/occasions` |
 | Skip-iteration | `src/lib/server/occasion-skips.ts` |
 | Privacy guards | `src/lib/server/people.ts` (`isPersonVisibleToUser`, `getOrCreateSelfPerson`) |
+| Shared components | `src/lib/components/{PersonPicker,BottomNav,PreviewBanner,SignedInBar}.svelte` |
 | PM2 config | `ecosystem.config.cjs` |
 | Backup script | `scripts/backup-sqlite.sh` |
 | Deploy script | `scripts/deploy-to-DO.sh` |
