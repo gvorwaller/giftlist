@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Plan — Non-P3 task slate (5 P1s + 2 P2s) — 2026-05-17</title>
+<style>
+  :root {
+    --bg: #f5f1e8;
+    --paper: #fffdf8;
+    --ink: #1f2a24;
+    --muted: #3d4a3f;
+    --evergreen: #2f5d50;
+    --soft-green: #e6efe9;
+    --amber: #bd7a2a;
+    --soft-amber: #fff2df;
+    --rose: #a54d43;
+    --line: #ddd2c2;
+  }
+  html { background: var(--bg); }
+  body {
+    font: 18px/1.55 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    margin: 0;
+    padding: 32px 16px 96px;
+  }
+  main {
+    max-width: 920px;
+    margin: 0 auto;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: 0 6px 20px rgba(47, 35, 18, 0.08);
+    padding: 40px 48px;
+  }
+  h1, h2, h3, h4 {
+    font-family: Georgia, "Times New Roman", serif;
+    color: var(--ink);
+    line-height: 1.25;
+  }
+  h1 { font-size: 32px; margin: 0 0 8px; }
+  h2 { font-size: 26px; margin: 40px 0 14px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h2:first-of-type { border-top: none; padding-top: 0; }
+  h3 { font-size: 22px; margin: 28px 0 10px; color: var(--evergreen); }
+  h4 { font-size: 19px; margin: 18px 0 8px; color: var(--muted); }
+  .meta { color: var(--muted); margin-bottom: 24px; font-size: 16px; }
+  p { margin: 10px 0; }
+  ul, ol { padding-left: 24px; margin: 10px 0; }
+  li { margin: 6px 0; }
+  code {
+    background: var(--soft-green);
+    color: var(--ink);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font: 15px/1.4 "SF Mono", Menlo, Consolas, monospace;
+  }
+  pre {
+    background: #1f2a24;
+    color: #f5f1e8;
+    padding: 14px 18px;
+    border-radius: 14px;
+    overflow-x: auto;
+    font: 14px/1.5 "SF Mono", Menlo, Consolas, monospace;
+  }
+  pre code { background: transparent; color: inherit; padding: 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 16px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th { background: var(--soft-green); color: var(--ink); font-weight: 600; }
+  .tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .tag.p1 { background: var(--soft-amber); color: var(--amber); }
+  .tag.p2 { background: var(--soft-green); color: var(--evergreen); }
+  .tag.bug { background: #fbe4e1; color: var(--rose); }
+  .tag.task { background: var(--soft-green); color: var(--evergreen); }
+  .callout {
+    background: var(--soft-amber);
+    border-left: 4px solid var(--amber);
+    padding: 12px 16px;
+    border-radius: 10px;
+    margin: 14px 0;
+  }
+  .rev {
+    background: var(--soft-green);
+    border-left: 4px solid var(--evergreen);
+    padding: 12px 16px;
+    border-radius: 10px;
+    margin: 14px 0;
+    font-size: 16px;
+  }
+  .rev strong { color: var(--evergreen); }
+  .seq {
+    counter-reset: step;
+    list-style: none;
+    padding-left: 0;
+  }
+  .seq li {
+    counter-increment: step;
+    padding: 10px 12px 10px 56px;
+    position: relative;
+    border-bottom: 1px solid var(--line);
+  }
+  .seq li:last-child { border-bottom: none; }
+  .seq li::before {
+    content: counter(step);
+    position: absolute;
+    left: 12px;
+    top: 10px;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    background: var(--evergreen);
+    color: var(--paper);
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    font-family: Georgia, serif;
+  }
+  .files {
+    background: var(--soft-green);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin: 10px 0;
+  }
+  .files strong { color: var(--evergreen); }
+  hr { border: none; border-top: 1px solid var(--line); margin: 32px 0; }
+  a { color: var(--evergreen); }
+  .strike { text-decoration: line-through; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Plan — Non-P3 task slate</h1>
+<p class="meta">2026-05-17 (v2, post-Codex review) · 5 P1s + 2 P2s · plan for <code>~/giftlist</code></p>
+
+<div class="rev">
+  <strong>v2 revision (2026-05-17):</strong> v1 of this plan was reviewed by Codex
+  against the current <code>main</code>. Seven findings verified against the
+  code; all accepted. v2 folds in the corrections:
+  <ul>
+    <li>Current schema is <strong>v18</strong>, not v15 — CLAUDE.md is stale.
+      New migrations renumbered to 019–022.</li>
+    <li><code>match_candidates_json</code> already exists
+      (<code>migrations/014:54</code>) — removed from new-column lists.</li>
+    <li>Tracking review route already exists
+      (<code>/admin/imports/tracking/review/</code>) — extend, don't create.</li>
+    <li>"Past gifts" on <code>/app/people/[id]</code> already surfaces archived
+      rows — admin view is now positioned as cross-person browser, not gap-fill.</li>
+    <li><code>disposition='review'</code> requires a real CHECK-constraint
+      migration + <code>types.ts</code> update — not "no schema change" as v1
+      claimed.</li>
+    <li><strong>td-d08902</strong> rescoped: schema-first design with a new
+      <code>order_shipments</code> table to properly model partial shipments
+      (current <code>orders</code> table is documented as
+      one-shipment-per-order at <code>migrations/018:47</code>).</li>
+    <li><strong>td-dc1846</strong> rescoped: adds <code>gifts.archived_at</code>
+      column so chronological sort is honest; drops "status at archive time"
+      (no snapshot available).</li>
+    <li><strong>td-1d01e9 Phase B (LLM)</strong> moved from page-load to
+      import-time — page load reads precomputed results from
+      <code>match_candidates_json</code>, never blocks on Anthropic API.</li>
+    <li><strong>td-c12570</strong> narrowed to a CSS/z-index fix; dropped
+      the <code>use:enhance</code> rewrite and the client-side
+      <code>console.warn</code> (won't reach server logs anyway).</li>
+  </ul>
+</div>
+
+<h2>Context</h2>
+<p>
+  Seven open <code>td</code> tasks across import/matching robustness, an
+  Amazon-review UI bug, and two admin UX gaps. Three are tightly coupled
+  (<code>td-54e689</code> is the umbrella epic for <code>td-d08902</code> +
+  <code>td-1d01e9</code>; <code>td-3d1ee6</code> is parallel on the
+  tracking-import side). The other three are independent: a UI bug
+  (<code>td-c12570</code>), an admin oversight page (<code>td-dc1846</code>),
+  and a reusable picker component (<code>td-77a119</code>).
+</p>
+
+<h3>Root cause themes from exploration</h3>
+<ul>
+  <li><strong>Matcher is purely lexical</strong>
+    (<code>gift-matcher.ts:69-78</code>, token-overlap with weak stopwording)
+    — produces the "Firehouse gift card → 2026 graduation card" nonsense
+    match in the user's screenshot.
+  </li>
+  <li><strong>Tracking-import silently falls back to self-gift creation</strong>
+    when order# match fails any of the vendor/source-url/self-package clauses
+    (<code>tracking-import.ts:548-585</code>). The Sunmed/USPS repro hit this
+    path.
+  </li>
+  <li><strong>Action bar likely sits below BottomNav</strong> —
+    <code>.actions</code> at <code>review/+page.svelte:906</code> uses
+    <code>position: sticky; bottom: 96px</code> with no <code>z-index</code>;
+    <code>BottomNav</code> is <code>position: fixed; z-index: 20</code>
+    (<code>BottomNav.svelte:52,63</code>). Hit-target eaten on scroll.
+  </li>
+  <li><strong>Archive infrastructure is complete but partial</strong>
+    (<code>gifts.ts:308-325</code> archive toggle + audit; "Past gifts"
+    section on <code>/app/people/[id]</code> already shows archived rows).
+    Missing: cross-person admin browser AND chronological metadata
+    (<code>archived_at</code> doesn't exist; only <code>updated_at</code>).
+  </li>
+  <li><strong>Orders model is one-shipment-per-order</strong>
+    (<code>migrations/018:47</code> comment). Multi-recipient orders that
+    ship in batches can't be represented correctly today.
+  </li>
+  <li><strong>Five recipient <code>&lt;select&gt;</code> instances</strong>,
+    all backed by the same <code>listPeople()</code> query, no shared
+    component.
+  </li>
+</ul>
+
+<h2>Sequence (recommended)</h2>
+<ol class="seq">
+  <li><strong>td-c12570</strong> — fix unresponsive buttons via z-index
+    (single-line CSS change + repro; smallest possible)</li>
+  <li><strong>td-1d01e9 Phase A</strong> — heuristic matcher improvements
+    (kills nonsense matches everywhere, no new deps)</li>
+  <li><strong>td-3d1ee6</strong> — tracking review queue: schema
+    (disposition enum), importer routing, UI extension</li>
+  <li><strong>td-d08902</strong> — schema-first: add <code>order_shipments</code>;
+    refactor lifecycle handler; per-shipment item matching</li>
+  <li><strong>td-1d01e9 Phase B</strong> — LLM second-pass at <em>import time</em>,
+    results persisted to <code>match_candidates_json</code></li>
+  <li><strong>td-77a119</strong> — <code>&lt;PersonPicker&gt;</code>
+    component, then swap into all 5 sites</li>
+  <li><strong>td-dc1846</strong> — add <code>gifts.archived_at</code>;
+    build <code>/admin/system/archived</code> cross-person browser</li>
+  <li>Close out <strong>td-54e689</strong> once both children land</li>
+</ol>
+
+<h2>td-c12570 <span class="tag p1">P1</span><span class="tag bug">bug</span>
+  — Amazon-review buttons unresponsive</h2>
+
+<h4>Cause (verified)</h4>
+<p>
+  <code>.actions</code> (<code>review/+page.svelte:906</code>) uses
+  <code>position: sticky; bottom: 96px</code> with no <code>z-index</code>.
+  <code>BottomNav</code> is <code>position: fixed; z-index: 20</code>
+  (<code>BottomNav.svelte:52,63</code>). On scroll the action bar paints
+  <em>under</em> BottomNav, eating the tap target. Verified by reading both
+  files; matches user's screenshot.
+</p>
+
+<h4>Change</h4>
+<ul>
+  <li>Add <code>z-index: 30</code> to <code>.actions</code> in
+    <code>src/routes/admin/imports/amazon/review/+page.svelte</code>.</li>
+  <li>Verify <code>padding-bottom</code> on the page main container clears
+    the 96px BottomNav reservation so the bar doesn't visually collide.</li>
+</ul>
+
+<div class="callout">
+  <strong>Explicitly out of scope</strong> (per Codex correction): the
+  <code>use:enhance</code> rewrite and the client-side
+  <code>console.warn</code>. There's no existing disabled-state to "re-arm",
+  and browser <code>console.warn</code> wouldn't reach server logs. Treat as
+  CSS-only; if buttons still misbehave after deploy, file a follow-up task.
+</div>
+
+<h4>Verify</h4>
+<ul>
+  <li><code>npm run dev</code>, open the review page in
+    <code>claude-in-chrome</code> on mobile-viewport. Scroll until BottomNav
+    and action bar collide. Both buttons must remain tappable.</li>
+  <li>Quick regression: confirm BottomNav still renders correctly on all
+    <code>/app/*</code> pages.</li>
+</ul>
+
+<h2>td-1d01e9 <span class="tag p1">P1</span><span class="tag task">task</span>
+  — Matcher fix (two phases)</h2>
+
+<h3>Phase A — heuristic tightening (no API dependency)</h3>
+<p>File: <code>src/lib/server/gift-matcher.ts</code></p>
+<ul>
+  <li>Expand stopword list: <code>gift, card, box, set, pack, item, items,
+    the, for, with, and, of, in, on, to, a, an, your, our, my, his, her,
+    their, mr, mrs, ms, dr, jr, sr, christmas, birthday, holiday,
+    graduation, party, day, year</code>.</li>
+  <li>Introduce <strong>anchor-token requirement</strong>: after
+    stopword/length filtering, the needle must contain at least one token
+    of length ≥ 5 that's not a digit-only string. Match is rejected if no
+    anchor token appears in the haystack.</li>
+  <li>Suppress weak-score outputs whose only overlap is generic stopwords.</li>
+</ul>
+<div class="callout">
+  Phase A alone kills the Firehouse / graduation match — only overlap is
+  "gift" + "card" (both stopwords); anchor token "firehouse" doesn't appear
+  in the haystack.
+</div>
+
+<h3>Phase B — LLM second-pass <em>at import time</em></h3>
+<p>
+  <strong>Critical rework</strong> per Codex finding #3: LLM calls do NOT
+  happen during page load. They run when the importer stages a row, and
+  results are persisted to <code>import_rows.match_candidates_json</code>
+  (column already exists, <code>migrations/014:54</code>). Page load just
+  renders precomputed results.
+</p>
+
+<h4>Migration</h4>
+<p><code>migrations/021-matcher-llm-cache.sql</code>:</p>
+<pre><code>CREATE TABLE matcher_llm_cache (
+  cache_key  TEXT PRIMARY KEY,
+  response   TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_matcher_llm_cache_created ON matcher_llm_cache (created_at);
+</code></pre>
+
+<h4>Code</h4>
+<ul>
+  <li>New <code>src/lib/server/matcher-llm.ts</code>. Anthropic SDK, Haiku
+    4.5. Brief structured-output prompt: needle + candidate list →
+    <code>{ best_index | null, reason }</code>. Cache by
+    <code>sha1(needle || sorted_candidate_titles)</code>.</li>
+  <li>Hook into <code>amazon-import.ts</code> staging path: when a row is
+    staged, run trigram first; for weak candidates (0.3 ≤ score &lt; 0.6)
+    that survived Phase A's anchor gate, call Haiku and persist the
+    confirmed/rejected result into <code>match_candidates_json</code>.</li>
+  <li>Page load (<code>review/+page.server.ts</code>) reads precomputed
+    candidates from the row — no synchronous LLM call.</li>
+  <li>Add <strong>"Re-evaluate matches"</strong> admin action on the review
+    page: walks all pending rows of the current run and re-runs Phase A + B.
+    Lets admin retroactively benefit from improved matching on
+    already-staged batches.</li>
+  <li><strong>Failure mode</strong>: if Anthropic API unavailable or key
+    absent, persist heuristic-only result. Importer never blocks on API.</li>
+  <li>New env: <code>ANTHROPIC_API_KEY</code> (managed via <code>.env</code> —
+    not via <code>/admin/settings</code>, which is read-only display).</li>
+  <li>Add to <code>.env.example</code>.</li>
+</ul>
+
+<h4>Verify</h4>
+<ul>
+  <li>Create <code>gift-matcher.test.ts</code>: Firehouse/graduation case
+    (Phase A rejects), Sunmed/gummies true match (Phase A accepts), LLM
+    mock for weak-confirmation (Phase B accepts/rejects).</li>
+  <li>Manual: clear API key, re-stage a run → confirm heuristic-only
+    result persisted; restore key, click "Re-evaluate matches" → confirm
+    cached results returned without re-billing.</li>
+</ul>
+
+<h2>td-3d1ee6 <span class="tag p1">P1</span><span class="tag task">task</span>
+  — Tracking review queue</h2>
+
+<h4>Schema — real changes required</h4>
+<p>
+  Per Codex finding #1, this is NOT a no-op. The <code>disposition</code>
+  CHECK constraint
+  (<code>migrations/014-tracking-import.sql:55-57</code>) only allows
+  <code>pending|accepted|skipped|failed</code>. SQLite CHECK constraints
+  require table recreation to relax.
+</p>
+
+<p>Migration <code>019-tracking-review-disposition.sql</code> using the
+  SQLite recreate-table pattern (per CLAUDE.md, migration runner toggles FK
+  off + runs <code>foreign_key_check</code> after):</p>
+<ol>
+  <li><code>CREATE TABLE import_rows_new (…)</code> with
+    <code>disposition CHECK IN ('pending','accepted','skipped','failed','review')</code>.</li>
+  <li>Copy all rows from old table.</li>
+  <li>Drop old table; rename new → <code>import_rows</code>.</li>
+  <li>Recreate indexes.</li>
+</ol>
+
+<h4>Type updates</h4>
+<p>
+  <code>src/lib/server/types.ts:224</code>:
+  <code>export type ImportRowDisposition = 'pending' | 'accepted' | 'skipped' | 'failed' | 'review';</code>
+</p>
+
+<h4>Importer changes</h4>
+<p>File: <code>src/lib/server/jobs/tracking-import.ts</code></p>
+<ul>
+  <li>Refactor <code>acceptTrackingRow</code> (lines 467-585): if order#
+    extracts cleanly AND a candidate gift exists with that
+    <code>order_id</code> BUT vendor/sender/self evidence is ambiguous → set
+    <code>disposition='review'</code> with candidate gift list serialized to
+    the existing <code>match_candidates_json</code> column, instead of
+    falling through to <code>createSelfPackage</code>.</li>
+  <li>Same path for <code>acceptOrderConfirmationRow</code> where sender
+    domain is unknown and order# matches multiple gifts.</li>
+  <li>Keep self-package fallback <strong>only</strong> when there's truly no
+    candidate (order# matches nothing in the DB).</li>
+  <li>Add <code>console.info</code> logging at each match-clause decision
+    point with row id, order_id, sender_domain, matched_gift_ids
+    (server-side, so logs are useful).</li>
+</ul>
+
+<h4>UI extension (route already exists)</h4>
+<p>
+  Per Codex finding #6: <code>src/routes/admin/imports/tracking/review/</code>
+  already exists and currently only handles <code>pending</code> rows with
+  accept/skip. Extend it:
+</p>
+<ul>
+  <li><code>+page.server.ts</code>: load both <code>pending</code> AND
+    <code>review</code> rows (separate buckets in the returned data).</li>
+  <li><code>+page.svelte</code>: render <code>review</code> rows in a
+    dedicated section above pending, with candidate gift cards (from
+    <code>match_candidates_json</code>) and three actions per row:
+    <strong>"Attach to this gift"</strong>,
+    <strong>"Create new self-package"</strong>,
+    <strong>"Skip"</strong>.</li>
+  <li>New form action <code>?/resolveReview</code> dispatching to the
+    appropriate importer function.</li>
+  <li>Audit-log each manual decision via existing <code>logAudit</code>.</li>
+</ul>
+
+<h4>Verify</h4>
+<ul>
+  <li>Repro Sunmed/USPS in dev: create gift with <code>order_id = 241943</code>,
+    no vendor, no source_url; replay a USPS shipment email. Confirm row
+    lands as <code>disposition='review'</code>, not as a new self-gift.</li>
+  <li>Confirm happy path (clean vendor + order# match) still
+    auto-attaches.</li>
+  <li>Run <code>PRAGMA foreign_key_check</code> after migration applies
+    cleanly.</li>
+</ul>
+
+<h2>td-d08902 <span class="tag p1">P1</span><span class="tag task">task</span>
+  — Multi-recipient shipping (schema-first rework)</h2>
+
+<div class="callout">
+  <strong>Major rescope</strong> per Codex finding #2. The current
+  <code>orders</code> table (<code>migrations/018:47</code>) documents
+  itself as <em>"Tracking facts, one shipment per real-world order"</em> —
+  a single <code>tracking_number</code>, <code>carrier</code>, and
+  <code>shipped_at</code>/<code>delivered_at</code>. Partial shipments
+  can't be represented. Need a schema migration before importer changes.
+</div>
+
+<h4>Schema</h4>
+<p>Migration <code>020-order-shipments.sql</code>:</p>
+<pre><code>CREATE TABLE order_shipments (
+  id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_pk                    INTEGER NOT NULL
+                              REFERENCES orders(id) ON DELETE CASCADE,
+  tracking_number             TEXT,
+  carrier                     TEXT,
+  tracking_provider_id        TEXT,
+  tracking_status             TEXT,
+  tracking_status_at          TEXT,
+  tracking_estimated_delivery TEXT,
+  amazon_tracking_url         TEXT,
+  shipped_at                  TEXT,
+  delivered_at                TEXT,
+  source_message_id           TEXT,
+  items_json                  TEXT,
+  created_at                  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at                  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_order_shipments_order_pk ON order_shipments (order_pk);
+CREATE INDEX idx_order_shipments_tracking ON order_shipments (tracking_number);
+</code></pre>
+
+<ul>
+  <li>Add <code>gifts.shipment_id INTEGER REFERENCES order_shipments(id) ON
+    DELETE SET NULL</code>. A gift belongs to at most one shipment per
+    order.</li>
+  <li><strong>Keep</strong> the existing order-level
+    <code>tracking_number</code>/<code>carrier</code>/<code>shipped_at</code>/<code>delivered_at</code>
+    columns on <code>orders</code> as a denormalized "latest/primary
+    shipment" summary for legacy reads. New code reads from
+    <code>order_shipments</code>; legacy reads continue to work without
+    immediate refactor.</li>
+  <li>Backfill: for every existing order with tracking facts, insert a
+    single <code>order_shipments</code> row populated from the order's
+    columns; set every gift under that order to
+    <code>shipment_id = &lt;new_id&gt;</code>.</li>
+</ul>
+
+<h4>Importer / lifecycle refactor</h4>
+<p>File: <code>src/lib/server/jobs/amazon-import.ts</code></p>
+<ul>
+  <li>Refactor <code>applyLifecycleEvent</code> (lines 726-768) for
+    <code>shipped</code>/<code>delivered</code> events:
+    <ol>
+      <li>Resolve the order via <code>order_id</code>.</li>
+      <li>If the shipping email body lists item titles
+        (<code>amazon-parser.ts:125-157</code>
+        <code>extractItemsFromBody</code>), fuzzy-match each shipped item
+        title against the order's sibling gifts using the Phase-A matcher.</li>
+      <li>Create one <code>order_shipments</code> row capturing
+        tracking#/carrier/timestamps/items_json.</li>
+      <li>For each matched sibling, set <code>gifts.shipment_id</code> and
+        advance status. Unmatched siblings keep their prior status.</li>
+      <li>Update the order-level summary columns to reflect the
+        most-recently-shipped shipment (for legacy read compatibility).</li>
+    </ol>
+  </li>
+  <li>When the email body doesn't enumerate items (rare), advance ALL
+    siblings under the order and log the case for review.</li>
+  <li>Multi-tracking emails: split by tracking#; one shipment row per
+    tracking#.</li>
+</ul>
+
+<h4>Verify</h4>
+<ul>
+  <li>Migration: existing prod data still loads after backfill — every
+    order with tracking facts has exactly one shipment row, every gift in
+    that order points to it.</li>
+  <li>New test fixture in <code>amazon-parser.test.ts</code>: 4-item /
+    3-recipient order, shipping email covering items 1 + 3. Confirm one
+    shipment row created, only siblings 1 and 3 advance.</li>
+  <li>Integration test: 2 shipping emails arriving in sequence for the
+    same multi-item order. Confirm 2 shipment rows, distinct subsets of
+    siblings advanced.</li>
+</ul>
+
+<h2>td-77a119 <span class="tag p2">P2</span><span class="tag task">task</span>
+  — Searchable recipient picker</h2>
+
+<p>(Unchanged from v1 — no Codex findings affect this task.)</p>
+
+<h4>Component</h4>
+<p>New file: <code>src/lib/components/PersonPicker.svelte</code></p>
+<ul>
+  <li>Props: <code>people: Person[]</code>, <code>bind:value: number | null</code>,
+    <code>name: string</code>, <code>required?: boolean</code>,
+    <code>placeholder?: string</code>, <code>oninput?: () =&gt; void</code>.</li>
+  <li>Markup: <code>&lt;div role="combobox"&gt;</code> with
+    <code>&lt;input type="text" aria-autocomplete="list"&gt;</code> +
+    <code>&lt;ul role="listbox"&gt;</code>, plus a hidden
+    <code>&lt;input type="hidden" name={name} value={value}&gt;</code> so
+    plain form submissions still carry <code>person_id</code>.</li>
+  <li>Filter: case-insensitive substring against <code>full_name</code> AND
+    <code>display_name</code>; match <code>relationship</code> if present.</li>
+  <li>Keyboard: ↑/↓ navigate, Enter to select, Esc to close, Tab to commit.</li>
+  <li>Styles: design tokens from CLAUDE.md (14px radius, 18px font, 48px
+    row height, AAA contrast on hover/selected).</li>
+  <li>No-JS fallback via <code>&lt;noscript&gt;</code>.</li>
+</ul>
+
+<h4>Swap-in sites (5)</h4>
+<ul>
+  <li><code>src/routes/app/gifts/new/+page.svelte:243</code></li>
+  <li><code>src/routes/app/gifts/[id]/edit/+page.svelte:83</code></li>
+  <li><code>src/routes/admin/imports/amazon/review/+page.svelte:197-206</code>
+    ("apply same recipient to all")</li>
+  <li><code>src/routes/admin/imports/amazon/review/+page.svelte:219</code>
+    (per-line-item picker)</li>
+  <li><code>src/routes/admin/imports/amazon/review/+page.svelte:342</code>
+    (single-item fallback)</li>
+</ul>
+
+<h4>Verify</h4>
+<ul>
+  <li>Keyboard-only flow on all 5 sites; screen-reader announcements match
+    WCAG combobox guidance.</li>
+  <li>Form submission parity: <code>?/create</code>, <code>?/save</code>,
+    <code>?/commit</code> actions receive <code>person_id</code> correctly.</li>
+</ul>
+
+<h2>td-dc1846 <span class="tag p2">P2</span><span class="tag task">task</span>
+  — Archived packages admin view</h2>
+
+<div class="callout">
+  <strong>Rescope</strong> per Codex finding #5: there is no
+  <code>archived_at</code> column and no "status at archive time" snapshot.
+  Adding a column for honest chronological sort; dropping the snapshot
+  ask. Repositioning the page as a <em>cross-person browser</em> — the
+  per-person "Past gifts" section on <code>/app/people/[id]</code> already
+  exists and is unaffected.
+</div>
+
+<h4>Schema</h4>
+<p>Migration <code>022-gifts-archived-at.sql</code>:</p>
+<pre><code>ALTER TABLE gifts ADD COLUMN archived_at TEXT;
+CREATE INDEX idx_gifts_archived_at ON gifts (archived_at);
+-- Backfill existing archived rows with updated_at as best-effort proxy.
+-- Acknowledged lossy for older rows; new archives will be accurate.
+UPDATE gifts SET archived_at = updated_at WHERE is_archived = 1;
+</code></pre>
+
+<h4>Code</h4>
+<ul>
+  <li><code>src/lib/server/gifts.ts:308-325</code> — update
+    <code>archiveGift()</code>:
+    <ul>
+      <li>When archiving (<code>archived=true</code>):
+        <code>archived_at = CURRENT_TIMESTAMP</code>.</li>
+      <li>When unarchiving (<code>archived=false</code>):
+        <code>archived_at = NULL</code>.</li>
+    </ul>
+  </li>
+</ul>
+
+<h4>Route</h4>
+<p>New: <code>src/routes/admin/system/archived/+page.{server.ts,svelte}</code></p>
+<ul>
+  <li>Load: query <code>gifts WHERE is_archived = 1</code>, joined with
+    <code>people</code> for display name. Paginate via the audit-log
+    pattern (<code>PAGE_SIZE = 50</code>, <code>?page=N</code>, return
+    <code>{ rows, total, totalPages }</code>).</li>
+  <li>Sort: <code>archived_at DESC NULLS LAST</code>.</li>
+  <li>Columns: gift title, person, current status, archived date, vendor,
+    order#, "Open" link to <code>/app/gifts/[id]</code>, inline
+    "Restore" form action.</li>
+  <li>Restore action: <code>archiveGift(id, false, locals.user.id)</code>
+    — existing function, no rewrite. Sets <code>archived_at = NULL</code>
+    per change above.</li>
+  <li>Search box: substring match on title and person name.</li>
+</ul>
+
+<h4>Link in</h4>
+<ul>
+  <li>Add a section/tile to <code>/admin/system</code> linking to the new
+    page.</li>
+</ul>
+
+<h4>Verify</h4>
+<ul>
+  <li>Archive a gift via <code>/app/gifts/[id]</code>; confirm
+    <code>archived_at</code> populated; appears at top of admin list.</li>
+  <li>Restore from admin list; confirm <code>archived_at = NULL</code>
+    and gift disappears from list.</li>
+  <li>"Past gifts" on <code>/app/people/[id]</code> still works unchanged
+    (regression check).</li>
+  <li>Pagination: temporarily lower <code>PAGE_SIZE</code> to test.</li>
+</ul>
+
+<h2>td-54e689 <span class="tag p1">P1</span> — Umbrella close-out</h2>
+<p>
+  No code changes of its own. Once <code>td-d08902</code> and
+  <code>td-1d01e9</code> are closed, mark <code>td-54e689</code> complete via
+  <code>td close td-54e689</code>.
+</p>
+
+<h2>Migration order</h2>
+<table>
+  <thead><tr><th>#</th><th>File</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>019</td>
+      <td><code>migrations/019-tracking-review-disposition.sql</code></td>
+      <td>Relax <code>import_rows.disposition</code> CHECK to include
+        <code>'review'</code> (recreate-table pattern)</td>
+    </tr>
+    <tr>
+      <td>020</td>
+      <td><code>migrations/020-order-shipments.sql</code></td>
+      <td>Add <code>order_shipments</code> table + <code>gifts.shipment_id</code>;
+        backfill existing orders</td>
+    </tr>
+    <tr>
+      <td>021</td>
+      <td><code>migrations/021-matcher-llm-cache.sql</code></td>
+      <td>Add <code>matcher_llm_cache</code> table for Haiku result
+        memoization</td>
+    </tr>
+    <tr>
+      <td>022</td>
+      <td><code>migrations/022-gifts-archived-at.sql</code></td>
+      <td>Add <code>gifts.archived_at</code>; backfill with
+        <code>updated_at</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Critical files</h2>
+<table>
+  <thead><tr><th>Area</th><th>File</th></tr></thead>
+  <tbody>
+    <tr><td>Matcher (Phase A)</td><td><code>src/lib/server/gift-matcher.ts</code></td></tr>
+    <tr><td>LLM matcher (new, import-time)</td><td><code>src/lib/server/matcher-llm.ts</code></td></tr>
+    <tr><td>Amazon importer</td><td><code>src/lib/server/jobs/amazon-import.ts</code></td></tr>
+    <tr><td>Tracking importer</td><td><code>src/lib/server/jobs/tracking-import.ts</code></td></tr>
+    <tr><td>Amazon review UI</td><td><code>src/routes/admin/imports/amazon/review/+page.{svelte,server.ts}</code></td></tr>
+    <tr><td>Tracking review UI (extend, exists)</td><td><code>src/routes/admin/imports/tracking/review/+page.{svelte,server.ts}</code></td></tr>
+    <tr><td>Disposition type</td><td><code>src/lib/server/types.ts:224</code></td></tr>
+    <tr><td>Gift archive</td><td><code>src/lib/server/gifts.ts:308-325</code> (add <code>archived_at</code>)</td></tr>
+    <tr><td>Orders model</td><td><code>src/lib/server/orders.ts</code> (new shipment helpers)</td></tr>
+    <tr><td>New picker</td><td><code>src/lib/components/PersonPicker.svelte</code></td></tr>
+    <tr><td>New admin view</td><td><code>src/routes/admin/system/archived/+page.{svelte,server.ts}</code></td></tr>
+  </tbody>
+</table>
+
+<h2>Reused utilities</h2>
+<div class="files">
+  <ul>
+    <li><strong>archiveGift</strong>(id, archived, actorUserId) —
+      <code>src/lib/server/gifts.ts:308</code> (extending to set
+      <code>archived_at</code>)</li>
+    <li><strong>listPeople</strong>({ includeArchived, includeSelf,
+      selfOwnerUserId, sort }) — <code>src/lib/server/people.ts:66</code></li>
+    <li><strong>isPersonVisibleToUser</strong>(personId, userId) —
+      <code>src/lib/server/people.ts:190</code></li>
+    <li><strong>logAudit</strong>(input) — <code>src/lib/server/audit.ts:23</code></li>
+    <li>Pagination pattern —
+      <code>src/routes/admin/audit/+page.server.ts:1-74</code></li>
+    <li>Amazon item parser — <code>src/lib/server/amazon-parser.ts:125-157</code></li>
+    <li><strong>match_candidates_json</strong> — existing column on
+      <code>import_rows</code> (<code>migrations/014:54</code>) — reused for
+      LLM matcher results, no new column needed</li>
+    <li>Migration runner FK-toggle pattern — <code>src/lib/server/migrate.ts</code>
+      (handles recreate-table migrations safely per CLAUDE.md)</li>
+  </ul>
+</div>
+
+<h2>Stale documentation to update</h2>
+<ul>
+  <li><code>CLAUDE.md</code> currently says "Current schema (v15)". After this
+    slate, current schema is <strong>v22</strong>. Update during devlog
+    entries as each migration lands, or in a single sweep at slate close.</li>
+</ul>
+
+<h2>End-to-end verification (per task)</h2>
+<ul>
+  <li><code>npm run check</code> — must remain 0-warning baseline</li>
+  <li><code>npm test</code> — vitest</li>
+  <li><code>npm run dev</code> smoke-test the changed flow in
+    <code>claude-in-chrome</code> on the mobile viewport</li>
+  <li>For each migration: confirm <code>PRAGMA foreign_key_check</code>
+    returns no rows after apply</li>
+  <li>Deploy via <code>./scripts/deploy-to-DO.sh</code> — never manual
+    SSH + build</li>
+  <li>Verify <code>/healthz</code> reports the expected
+    <code>schema_version</code> post-deploy</li>
+  <li>Brief devlog entry in <code>docs/devlog/YYYY-MM-DD.md</code> per task
+    landing</li>
+</ul>
+
+</main>
+</body>
+</html>
