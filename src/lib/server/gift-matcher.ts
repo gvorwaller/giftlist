@@ -23,8 +23,24 @@ const TIE_BREAK_MARGIN = 0.15;
 const STOP_WORDS = new Set([
 	'the', 'and', 'for', 'with', 'from', 'this', 'that', 'set', 'pack', 'pcs',
 	'piece', 'pieces', 'item', 'items', 'lot', 'each', 'pcs.', 'inch', 'inches',
-	'ft', 'feet', 'cm', 'mm'
+	'ft', 'feet', 'cm', 'mm',
+	// td-1d01e9 Phase A: words too generic to anchor a meaningful match.
+	// Without these, "Firehouse gift card" would score 33% against
+	// "Mcduldul Graduation Card for Grandson..." purely on 'card' overlap.
+	'gift', 'gifts', 'card', 'cards', 'box', 'boxes',
+	'your', 'our', 'his', 'her', 'their',
+	'christmas', 'birthday', 'holiday', 'graduation', 'party', 'wedding',
+	'anniversary', 'new', 'old', 'best'
 ]);
+
+// A token is "anchor-grade" if it's long enough and not a bare number —
+// brand names, proper nouns, distinctive product words. Generic tokens
+// like 'gift'/'card' are excluded by the stopword list above; very short
+// tokens are excluded by the length filter in tokens().
+const ANCHOR_MIN_LENGTH = 5;
+function isAnchorToken(t: string): boolean {
+	return t.length >= ANCHOR_MIN_LENGTH && !/^\d+$/.test(t);
+}
 
 function tokens(s: string): string[] {
 	return Array.from(
@@ -38,7 +54,7 @@ function tokens(s: string): string[] {
 	);
 }
 
-interface CandidateRow {
+export interface ScoringCandidate {
 	id: number;
 	title: string;
 	person_id: number;
@@ -46,17 +62,20 @@ interface CandidateRow {
 }
 
 /**
- * Token-overlap fuzzy match between an Amazon-parsed item title and open
- * gifts that haven't been linked to an order yet. Lets the review UI propose
- * "this email looks like the Endoscope idea you logged for Benjamin" when
- * Amazon's emails strip recipient and gift designation.
+ * Pure scoring function — separated from the DB query so it can be unit
+ * tested with synthetic candidates. Given a parsed email title and a list
+ * of candidate gifts, returns the top-5 scored matches and an overall
+ * strong/weak/none confidence.
  *
  * Score = fraction of gift-title tokens (the needle) found in the email
  * title (the haystack). Single-product needles like "Endoscope" against a
  * verbose Amazon title score 1.0; multi-item gift titles still match if at
- * least 30% of tokens align.
+ * least 30% of tokens align AND the anchor-token gate is satisfied.
  */
-export function matchGiftByTitle(parsedTitle: string | null | undefined): GiftMatchResult {
+export function scoreGiftCandidates(
+	parsedTitle: string | null | undefined,
+	rows: ScoringCandidate[]
+): GiftMatchResult {
 	if (!parsedTitle || !parsedTitle.trim()) {
 		return { topId: null, confidence: 'none', candidates: [] };
 	}
@@ -64,18 +83,6 @@ export function matchGiftByTitle(parsedTitle: string | null | undefined): GiftMa
 	if (haystackTokens.size === 0) {
 		return { topId: null, confidence: 'none', candidates: [] };
 	}
-
-	const db = getDb();
-	const rows = db
-		.prepare<[], CandidateRow>(
-			`SELECT g.id, g.title, g.person_id, p.display_name
-			   FROM gifts g
-			   JOIN people p ON p.id = g.person_id
-			  WHERE g.is_archived = 0
-			    AND g.order_id IS NULL
-			    AND g.status IN ('idea', 'planned')`
-		)
-		.all();
 	if (rows.length === 0) {
 		return { topId: null, confidence: 'none', candidates: [] };
 	}
@@ -84,6 +91,14 @@ export function matchGiftByTitle(parsedTitle: string | null | undefined): GiftMa
 		.map((r) => {
 			const needle = tokens(r.title);
 			if (needle.length === 0) return { row: r, score: 0 };
+			// td-1d01e9 Phase A: anchor-token gate. The needle must contain at
+			// least one anchor-grade token (≥5 char, non-digit) AND that anchor
+			// must appear in the haystack. Otherwise we're matching on noise
+			// like 'gift'/'card' alone — see Firehouse/graduation false positive.
+			const needleAnchors = needle.filter(isAnchorToken);
+			if (needleAnchors.length === 0) return { row: r, score: 0 };
+			const anchorHit = needleAnchors.some((t) => haystackTokens.has(t));
+			if (!anchorHit) return { row: r, score: 0 };
 			const hits = needle.filter((t) => haystackTokens.has(t)).length;
 			return { row: r, score: hits / needle.length };
 		})
@@ -116,4 +131,25 @@ export function matchGiftByTitle(parsedTitle: string | null | undefined): GiftMa
 			score: Number(s.score.toFixed(2))
 		}))
 	};
+}
+
+/**
+ * Token-overlap fuzzy match between an Amazon-parsed item title and open
+ * gifts that haven't been linked to an order yet. Lets the review UI propose
+ * "this email looks like the Endoscope idea you logged for Benjamin" when
+ * Amazon's emails strip recipient and gift designation.
+ */
+export function matchGiftByTitle(parsedTitle: string | null | undefined): GiftMatchResult {
+	const db = getDb();
+	const rows = db
+		.prepare<[], ScoringCandidate>(
+			`SELECT g.id, g.title, g.person_id, p.display_name
+			   FROM gifts g
+			   JOIN people p ON p.id = g.person_id
+			  WHERE g.is_archived = 0
+			    AND g.order_id IS NULL
+			    AND g.status IN ('idea', 'planned')`
+		)
+		.all();
+	return scoreGiftCandidates(parsedTitle, rows);
 }

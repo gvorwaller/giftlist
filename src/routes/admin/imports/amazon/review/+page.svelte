@@ -910,6 +910,10 @@
 		margin-top: 16px;
 		position: sticky;
 		bottom: 96px;
+		/* td-c12570: BottomNav is fixed at z-index: 20 — without an explicit
+		   z-index here, taps near the action bar's bottom edge land on the
+		   nav instead of the Commit/Skip buttons. */
+		z-index: 30;
 		background: linear-gradient(180deg, transparent 0%, var(--bg) 50%);
 		padding: 16px 0 8px;
 	}
