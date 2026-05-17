@@ -18,7 +18,7 @@ Mobile-first gift tracking web app with two roles: a gift manager (primary user)
 
 **Accessibility is a core design constraint, not a nice-to-have.** See design spec Section 11 for detailed guidelines.
 
-The original 6-phase plan in `docs/gift-tracker-implementation-plan-Codex.md` is largely shipped (phases 1-6 complete; ongoing work tracked in `td` and `docs/devlog/YYYY-MM-DD.md`). Schema currently at v15.
+The original 6-phase plan in `docs/gift-tracker-implementation-plan-Codex.md` is largely shipped (phases 1-6 complete; ongoing work tracked in `td` and `docs/devlog/YYYY-MM-DD.md`). Schema currently at v22.
 
 ## Commands
 
@@ -70,14 +70,16 @@ cc-status --lines 20                         # last 20 entries
 ### Data Layer
 SQLite (WAL, single-writer). Migrations live in `migrations/NNN-name.sql` and run at boot via `src/lib/server/migrate.ts`. The runner toggles `PRAGMA foreign_keys = OFF` before each migration's transaction and runs `PRAGMA foreign_key_check` after commit, so migrations needing the SQLite recreate-table pattern (e.g. 014, 015) are safe.
 
-Current schema (v15) — tables grouped by domain:
+Current schema (v22) — tables grouped by domain:
 
 - **Identity**: `users`, `sessions`, `external_tokens` (encrypted Google OAuth)
 - **Recipients**: `people` (with `is_self` + `owner_user_id` for per-user privacy on personal packages), `person_aliases`
 - **Occasions**: `occasions`, `person_occasions`, `occasion_skips` (per-iteration skips, td-927a2d)
-- **Gifts**: `gifts` (full lifecycle), `vendors`, `shippers` (USPS / UPS / FedEx / Other / DHL / OnTrac / Lasership), `shipment_events`
+- **Gifts**: `gifts` (full lifecycle, `archived_at` td-dc1846, `shipment_id` td-d08902), `vendors`, `shippers` (USPS / UPS / FedEx / Other / DHL / OnTrac / Lasership), `shipment_events`
+- **Orders**: `orders` (1:N over `gifts`, td-3e9ae2), `order_shipments` (N:1 under `orders` for partial shipments, td-d08902)
 - **Drafts / history**: `drafts`, `recently_viewed`
-- **Imports**: `import_runs` (`source` ∈ {`amazon_email`, `tracking_email`}), `import_rows` (`email_type` includes `tracking_only`)
+- **Imports**: `import_runs` (`source` ∈ {`amazon_email`, `tracking_email`}), `import_rows` (`email_type` includes `tracking_only`, `order_confirmation`; `disposition` includes `review` td-3d1ee6)
+- **Matcher**: `matcher_llm_cache` (Haiku verdicts on weak gift-matches, td-1d01e9)
 - **Ops**: `audit_log`, `job_runs`, `app_state`
 
 ### Route Structure
