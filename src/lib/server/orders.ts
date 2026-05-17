@@ -1,5 +1,6 @@
 import { getDb } from './db';
-import type { Gift, Order } from './types';
+import { scoreGiftCandidates, type ScoringCandidate } from './gift-matcher';
+import type { Gift, Order, OrderShipment } from './types';
 
 /**
  * td-3e9ae2: order CRUD helpers.
@@ -112,4 +113,172 @@ export function listGiftsForOrder(orderPk: number): Gift[] {
 			  ORDER BY COALESCE(line_item_index, 0), id`
 		)
 		.all(orderPk);
+}
+
+// ---------------------------------------------------------------------
+// td-d08902: per-shipment helpers.
+//
+// One `order_shipments` row per real shipment. Multi-item / multi-recipient
+// orders can ship in batches; each batch lands in a distinct shipment row
+// and only the gifts contained in that batch get attached + status-advanced.
+
+export interface ShipmentUpsertInput {
+	order_pk: number;
+	tracking_number?: string | null;
+	carrier?: string | null;
+	tracking_provider_id?: string | null;
+	amazon_tracking_url?: string | null;
+	shipped_at?: string | null;
+	delivered_at?: string | null;
+	source_message_id?: string | null;
+	items_json?: string | null;
+}
+
+export function getShipmentById(id: number): OrderShipment | undefined {
+	const db = getDb();
+	return db.prepare<[number], OrderShipment>('SELECT * FROM order_shipments WHERE id = ?').get(id);
+}
+
+export function listShipmentsForOrder(orderPk: number): OrderShipment[] {
+	const db = getDb();
+	return db
+		.prepare<[number], OrderShipment>(
+			`SELECT * FROM order_shipments
+			  WHERE order_pk = ?
+			  ORDER BY COALESCE(shipped_at, created_at), id`
+		)
+		.all(orderPk);
+}
+
+/**
+ * Find an existing shipment under this order matching the given tracking
+ * number (preferred) or source message id (fallback for emails that arrived
+ * without a parseable tracking#). Returns undefined if no shipment yet
+ * matches — caller creates a new one.
+ */
+export function findShipment(
+	orderPk: number,
+	trackingNumber: string | null,
+	sourceMessageId: string | null
+): OrderShipment | undefined {
+	const db = getDb();
+	if (trackingNumber) {
+		const byTracking = db
+			.prepare<[number, string], OrderShipment>(
+				`SELECT * FROM order_shipments
+				  WHERE order_pk = ? AND tracking_number = ?
+				  ORDER BY id ASC LIMIT 1`
+			)
+			.get(orderPk, trackingNumber);
+		if (byTracking) return byTracking;
+	}
+	if (sourceMessageId) {
+		const byMsg = db
+			.prepare<[number, string], OrderShipment>(
+				`SELECT * FROM order_shipments
+				  WHERE order_pk = ? AND source_message_id = ?
+				  ORDER BY id ASC LIMIT 1`
+			)
+			.get(orderPk, sourceMessageId);
+		if (byMsg) return byMsg;
+	}
+	return undefined;
+}
+
+/**
+ * Idempotent shipment creation. Reuses an existing shipment row keyed by
+ * (order_pk, tracking_number) or (order_pk, source_message_id) when present,
+ * filling NULL fields from the input. Otherwise inserts a new row. Returns
+ * the shipment id.
+ */
+export function upsertShipment(input: ShipmentUpsertInput): number {
+	const db = getDb();
+	const existing = findShipment(
+		input.order_pk,
+		input.tracking_number ?? null,
+		input.source_message_id ?? null
+	);
+	if (existing) {
+		db.prepare(
+			`UPDATE order_shipments
+			    SET tracking_number      = COALESCE(tracking_number, ?),
+			        carrier              = COALESCE(carrier, ?),
+			        tracking_provider_id = COALESCE(tracking_provider_id, ?),
+			        amazon_tracking_url  = COALESCE(amazon_tracking_url, ?),
+			        shipped_at           = COALESCE(shipped_at, ?),
+			        delivered_at         = COALESCE(delivered_at, ?),
+			        source_message_id    = COALESCE(source_message_id, ?),
+			        items_json           = COALESCE(items_json, ?),
+			        updated_at           = CURRENT_TIMESTAMP
+			  WHERE id = ?`
+		).run(
+			input.tracking_number ?? null,
+			input.carrier ?? null,
+			input.tracking_provider_id ?? null,
+			input.amazon_tracking_url ?? null,
+			input.shipped_at ?? null,
+			input.delivered_at ?? null,
+			input.source_message_id ?? null,
+			input.items_json ?? null,
+			existing.id
+		);
+		return existing.id;
+	}
+	const info = db
+		.prepare(
+			`INSERT INTO order_shipments (
+			   order_pk, tracking_number, carrier, tracking_provider_id,
+			   amazon_tracking_url, shipped_at, delivered_at,
+			   source_message_id, items_json
+			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		)
+		.run(
+			input.order_pk,
+			input.tracking_number ?? null,
+			input.carrier ?? null,
+			input.tracking_provider_id ?? null,
+			input.amazon_tracking_url ?? null,
+			input.shipped_at ?? null,
+			input.delivered_at ?? null,
+			input.source_message_id ?? null,
+			input.items_json ?? null
+		);
+	return Number(info.lastInsertRowid);
+}
+
+/**
+ * td-d08902: given a list of item titles claimed to be in this shipment
+ * (from the parsed Amazon email body) and the sibling gifts under the
+ * parent order, return the subset of siblings that match those titles via
+ * the Phase-A fuzzy matcher.
+ *
+ * Returns ALL siblings if the email had no item titles (legacy/single-item
+ * shipping notification). Returns an empty array when item titles are
+ * present but none match — caller may decide to fall back to "advance all"
+ * with a log.
+ */
+export function matchSiblingsToShipment(
+	siblings: Gift[],
+	shippedItemTitles: string[]
+): { matched: Gift[]; itemsHadTitles: boolean } {
+	if (shippedItemTitles.length === 0) {
+		return { matched: siblings, itemsHadTitles: false };
+	}
+	const candidates: ScoringCandidate[] = siblings.map((s) => ({
+		id: s.id,
+		title: s.title,
+		person_id: s.person_id,
+		display_name: ''
+	}));
+	const matchedIds = new Set<number>();
+	for (const itemTitle of shippedItemTitles) {
+		const result = scoreGiftCandidates(itemTitle, candidates);
+		for (const c of result.candidates) {
+			matchedIds.add(c.giftId);
+		}
+	}
+	return {
+		matched: siblings.filter((s) => matchedIds.has(s.id)),
+		itemsHadTitles: true
+	};
 }

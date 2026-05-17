@@ -17,7 +17,12 @@
 	}
 
 	const pending = $derived(data.rows.filter((r) => r.disposition === 'pending'));
-	const handled = $derived(data.rows.filter((r) => r.disposition !== 'pending'));
+	// td-3d1ee6: review rows are between pending and handled — they
+	// need the admin to pick between candidate gifts found by order# match.
+	const review = $derived(data.rows.filter((r) => r.disposition === 'review'));
+	const handled = $derived(
+		data.rows.filter((r) => r.disposition !== 'pending' && r.disposition !== 'review')
+	);
 
 	let confirmingSkipAll = $state(false);
 	let confirmingAcceptAll = $state(false);
@@ -26,6 +31,7 @@
 	const flashLinked = $derived(Number($page.url.searchParams.get('linked') ?? '0'));
 	const flashSkipped = $derived(Number($page.url.searchParams.get('skipped') ?? '0'));
 	const flashFailed = $derived(Number($page.url.searchParams.get('failed') ?? '0'));
+	const flashReview = $derived(Number($page.url.searchParams.get('review') ?? '0'));
 	const flashMoveFails = $derived(Number($page.url.searchParams.get('move_failures') ?? '0'));
 </script>
 
@@ -45,11 +51,13 @@
 		</p>
 	</header>
 
-	{#if flashCreated + flashLinked + flashSkipped + flashFailed > 0}
+	{#if flashCreated + flashLinked + flashSkipped + flashFailed + flashReview > 0}
 		<div class="flash ok" role="status">
 			{#if flashCreated > 0}{flashCreated} self-package{flashCreated === 1 ? '' : 's'}
 				created · {/if}{#if flashLinked > 0}{flashLinked} linked to existing · {/if}{#if flashSkipped > 0}{flashSkipped}
-				skipped · {/if}{#if flashFailed > 0}{flashFailed} failed{/if}
+				skipped · {/if}{#if flashFailed > 0}{flashFailed} failed{/if}{#if flashReview > 0} ·
+				<strong>{flashReview} routed to review</strong> (order# matched existing gifts — pick the right
+				one below){/if}
 			{#if flashMoveFails > 0}
 				<br />{flashMoveFails} Gmail label moves failed (check logs).
 			{/if}
@@ -58,6 +66,124 @@
 
 	{#if form?.error}
 		<div class="flash err" role="alert">{form.error}</div>
+	{/if}
+
+	{#if review.length > 0}
+		<!-- td-3d1ee6: rows the importer routed to manual review. Each has
+		     one or more candidate gifts that share the parsed order#, but
+		     vendor/sender evidence didn't confirm the match. Admin picks
+		     which (if any) to attach to. -->
+		<form method="POST" action="?/resolveReview" class="review-form review-queue">
+			<input type="hidden" name="run_id" value={data.run.id} />
+			<header class="queue-head">
+				<h2>{review.length} needs your decision</h2>
+				<p class="muted bulk">
+					The importer found existing gifts with these order numbers but couldn't tell
+					if the email actually belongs to one of them (vendor/sender evidence was
+					ambiguous). Pick the right match, create a new self-package, or skip.
+				</p>
+			</header>
+
+			<ul class="rows">
+				{#each review as r (r.id)}
+					{@const candidates = data.reviewCandidates[r.id] ?? []}
+					<li class="row-card review-card">
+						<input type="hidden" name="review_row_id" value={r.id} />
+						<div class="row-head">
+							<div>
+								<p class="subject">{r.subject ?? '(no subject)'}</p>
+								<p class="meta">
+									{r.parsed_carrier ?? 'unknown carrier'}
+									· from {r.parsed_sender_domain ?? r.from_address ?? '(unknown)'}
+									· {formatReceived(r.received_at)}
+								</p>
+							</div>
+							<div class="infer review">→ ambiguous order# match</div>
+						</div>
+
+						{#if r.error_message}
+							<p class="warning" role="note">⚠ {r.error_message}</p>
+						{/if}
+
+						{#if r.parsed_tracking_number}
+							<p class="parsed">
+								<span class="label">Tracking</span>
+								<span class="mono">{r.parsed_tracking_number}</span>
+							</p>
+						{/if}
+						{#if r.parsed_order_id}
+							<p class="parsed">
+								<span class="label">Order ID</span>
+								<span class="mono">{r.parsed_order_id}</span>
+							</p>
+						{/if}
+
+						<fieldset class="candidates">
+							<legend class="eyebrow">Existing gifts on this order#</legend>
+							{#each candidates as c (c.giftId)}
+								<label class="candidate">
+									<input
+										type="radio"
+										name="review_action_{r.id}"
+										value="attach"
+										onchange={(e) => {
+											const fd = (e.currentTarget as HTMLInputElement).form;
+											const hidden = fd?.querySelector(
+												`input[name="review_gift_${r.id}"]`
+											) as HTMLInputElement | null;
+											if (hidden) hidden.value = String(c.giftId);
+										}}
+									/>
+									<span class="candidate-body">
+										<strong>Attach to gift #{c.giftId}</strong>
+										— {c.title}
+										<br />
+										<span class="muted-inline">
+											for {c.personDisplayName}
+											{#if c.vendorName}· {c.vendorName}{/if}
+											· status {c.status}
+										</span>
+									</span>
+								</label>
+							{/each}
+							<!-- Per-row hidden field captures the chosen giftId; the radio
+							     handlers above update it. Server falls back to fail() if
+							     attach is selected without a giftId, so the UX is safe
+							     even with JS off (no JS → no attach option fires). -->
+							<input type="hidden" name="review_gift_{r.id}" value="" />
+						</fieldset>
+
+						<div class="choice-grid">
+							<label class="radio leave">
+								<input
+									type="radio"
+									name="review_action_{r.id}"
+									value="self_package"
+								/>
+								<span>None of these — create a new self-package</span>
+							</label>
+							<label class="radio leave">
+								<input type="radio" name="review_action_{r.id}" value="skip" />
+								<span>Skip → move to Processed</span>
+							</label>
+							<label class="radio leave">
+								<input
+									type="radio"
+									name="review_action_{r.id}"
+									value="leave"
+									checked
+								/>
+								<span>Leave for later → stays in review queue</span>
+							</label>
+						</div>
+					</li>
+				{/each}
+			</ul>
+
+			<div class="actions">
+				<button type="submit" class="primary">Apply review decisions</button>
+			</div>
+		</form>
 	{/if}
 
 	{#if pending.length === 0}
@@ -389,9 +515,68 @@
 		margin-top: 16px;
 		position: sticky;
 		bottom: 96px;
+		/* td-c12570: BottomNav is fixed at z-index: 20 — without an explicit
+		   z-index here, taps near the action bar's bottom edge land on the
+		   nav instead of the action buttons. */
+		z-index: 30;
 		background: linear-gradient(180deg, transparent 0%, var(--bg) 50%);
 		padding: 16px 0 8px;
 	}
+
+	/* td-3d1ee6: review-queue styling */
+	.review-queue { margin-bottom: 18px; }
+	.queue-head { margin-bottom: 10px; }
+	.queue-head h2 {
+		font-family: var(--font-serif);
+		font-size: 22px;
+		color: var(--amber);
+		margin-bottom: 6px;
+	}
+	.review-card {
+		border-color: var(--amber);
+		background: var(--amber-soft);
+	}
+	.infer.review {
+		background: var(--amber);
+		color: var(--paper);
+	}
+	.candidates {
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		padding: 10px 12px;
+		background: var(--paper);
+		margin: 6px 0 4px;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.candidates legend {
+		padding: 0 6px;
+		background: var(--paper);
+		border-radius: var(--radius-pill);
+	}
+	.candidate {
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+		font-family: var(--font-sans);
+		font-size: 14px;
+		line-height: 1.4;
+		min-height: var(--tap-target);
+		padding: 6px 4px;
+		cursor: pointer;
+	}
+	.candidate input[type='radio'] {
+		width: 20px;
+		height: 20px;
+		accent-color: var(--green);
+		margin-top: 2px;
+		flex-shrink: 0;
+	}
+	.candidate-body { flex: 1 1 auto; min-width: 0; }
+	.candidate strong { color: var(--ink); }
+
+	.handled-list li.review .tag { background: var(--amber-soft); color: var(--amber); }
 
 	.primary,
 	.ghost,

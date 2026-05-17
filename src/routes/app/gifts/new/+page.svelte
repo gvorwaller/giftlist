@@ -3,6 +3,7 @@
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import type { ActionData, PageData } from './$types';
 	import type { GiftDraftPayload } from './+page.server';
+	import PersonPicker from '$lib/components/PersonPicker.svelte';
 
 	interface Props {
 		data: PageData;
@@ -33,9 +34,15 @@
 		};
 	});
 
-	const initialPrefillPersonId = untrack(() => String(data.prefill.person_id ?? ''));
+	// td-77a119: keep as number | null to match the new PersonPicker contract.
+	const initialPrefillPersonId = untrack(() => data.prefill.person_id ?? null);
 
-	let personId = $state(initial.person_id);
+	// td-77a119: personId is a number | null to match PersonPicker's bound type;
+	// hidden form input still submits as string. initial.person_id arrives as
+	// string from the draft prefill so we coerce here.
+	let personId = $state<number | null>(
+		initial.person_id ? Number(initial.person_id) : null
+	);
 	let title = $state(initial.title);
 	let vendorId = $state(initial.vendor_id);
 	let occasionId = $state(initial.occasion_id);
@@ -61,8 +68,7 @@
 	// so we don't keep forcing it open after the user manually closes it.
 	let lastSelfState = $state(false);
 	$effect(() => {
-		const id = Number(personId);
-		const found = id ? data.people.find((p) => p.id === id) : null;
+		const found = personId ? data.people.find((p) => p.id === personId) : null;
 		const isSelfNow = found?.is_self === 1;
 		if (isSelfNow && !lastSelfState) {
 			moreDetailsOpen = true;
@@ -81,9 +87,8 @@
 	// status to "ordered" so it lands on /app/packages immediately, and hide
 	// the gift-flavored "Just an idea" checkbox + occasion field.
 	const selectedIsSelf = $derived.by(() => {
-		const id = Number(personId);
-		if (!id) return false;
-		const found = data.people.find((p) => p.id === id);
+		if (!personId) return false;
+		const found = data.people.find((p) => p.id === personId);
 		return found?.is_self === 1;
 	});
 
@@ -96,7 +101,7 @@
 
 	function snapshot(): GiftDraftPayload {
 		return {
-			person_id: personId ? Number(personId) : null,
+			person_id: personId,
 			title,
 			vendor_id: vendorId ? Number(vendorId) : null,
 			occasion_id: occasionId ? Number(occasionId) : null,
@@ -240,14 +245,14 @@
 	>
 		<label class="big">
 			<span>Who is it for?</span>
-			<select name="person_id" bind:value={personId} required oninput={handlePersonChange}>
-				<option value="">Pick a person…</option>
-				{#each data.people as p (p.id)}
-					<option value={String(p.id)}>
-						{p.display_name}{p.is_self ? ' (me)' : ''}
-					</option>
-				{/each}
-			</select>
+			<PersonPicker
+				people={data.people}
+				bind:value={personId}
+				name="person_id"
+				required
+				placeholder="Pick a person…"
+				onchange={() => handlePersonChange()}
+			/>
 		</label>
 
 		<label class="big">

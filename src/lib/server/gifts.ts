@@ -310,9 +310,16 @@ export function archiveGift(id: number, archived: boolean, actorUserId: number):
 	if (!before) throw new Error(`Gift ${id} not found`);
 	if (Boolean(before.is_archived) === archived) return before;
 	const db = getDb();
+	// td-dc1846: archived_at stamps when this gift was archived so the admin
+	// browser at /admin/system/archived can sort chronologically. Cleared on
+	// restore so an unarchived gift doesn't keep its old archive timestamp.
 	db.prepare(
-		'UPDATE gifts SET is_archived = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-	).run(archived ? 1 : 0, id);
+		`UPDATE gifts
+		    SET is_archived = ?,
+		        archived_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
+		        updated_at = CURRENT_TIMESTAMP
+		  WHERE id = ?`
+	).run(archived ? 1 : 0, archived ? 1 : 0, id);
 	const after = getGiftById(id)!;
 	logAudit({
 		actorUserId,

@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { untrack } from 'svelte';
 	import type { ActionData, PageData } from './$types';
+	import PersonPicker from '$lib/components/PersonPicker.svelte';
 
 	interface Props {
 		data: PageData;
@@ -27,9 +28,13 @@
 		};
 	});
 
-	const originalPersonId = untrack(() => String(data.gift.person_id));
+	// td-77a119: number | null to match PersonPicker contract; hidden form
+	// input still submits as string.
+	const originalPersonId = untrack(() => data.gift.person_id);
 
-	let personId = $state(initial.person_id);
+	let personId = $state<number | null>(
+		initial.person_id ? Number(initial.person_id) : null
+	);
 	let title = $state(initial.title);
 	let vendorId = $state(initial.vendor_id);
 	let sourceUrl = $state(initial.source_url);
@@ -80,13 +85,14 @@
 	>
 		<label class="big">
 			<span>Who is it for?</span>
-			<select name="person_id" bind:value={personId} required oninput={handlePersonChange}>
-				{#each data.people as p (p.id)}
-					<option value={String(p.id)}>
-						{p.display_name}{p.is_self ? ' (me)' : ''}
-					</option>
-				{/each}
-			</select>
+			<PersonPicker
+				people={data.people}
+				bind:value={personId}
+				name="person_id"
+				required
+				placeholder="Pick a person…"
+				onchange={() => handlePersonChange()}
+			/>
 		</label>
 
 		{#if personChanged}

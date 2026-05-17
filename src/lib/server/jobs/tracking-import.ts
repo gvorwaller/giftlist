@@ -323,6 +323,10 @@ export interface CommitTrackingResult {
 	giftsLinked: number;
 	rowsSkipped: number;
 	rowsFailed: number;
+	// td-3d1ee6: rows the importer routed to manual review (order# matched
+	// existing gifts but vendor/sender evidence was ambiguous). Admin
+	// resolves via /admin/imports/tracking/review.
+	rowsRoutedToReview: number;
 	labelMoveFailures: number;
 }
 
@@ -348,6 +352,7 @@ export async function commitTrackingReviewedRows(
 		giftsLinked: 0,
 		rowsSkipped: 0,
 		rowsFailed: 0,
+		rowsRoutedToReview: 0,
 		labelMoveFailures: 0
 	};
 
@@ -364,6 +369,16 @@ export async function commitTrackingReviewedRows(
 	const updateRow = db.prepare(
 		`UPDATE import_rows
 		    SET disposition = ?, gift_id = ?, error_message = ?,
+		        updated_at = CURRENT_TIMESTAMP
+		  WHERE id = ?`
+	);
+	// td-3d1ee6: separate statement for the review-routing path — also
+	// writes match_candidates_json so the review UI can render the
+	// candidate gifts the importer found.
+	const updateRowForReview = db.prepare(
+		`UPDATE import_rows
+		    SET disposition = 'review', gift_id = NULL,
+		        error_message = ?, match_candidates_json = ?,
 		        updated_at = CURRENT_TIMESTAMP
 		  WHERE id = ?`
 	);
@@ -417,6 +432,20 @@ export async function commitTrackingReviewedRows(
 			const outcome = isOrderConfirmation
 				? await acceptOrderConfirmationRow(row, userId)
 				: await acceptTrackingRow(row, userId);
+
+			// td-3d1ee6: review-routed outcomes don't create or link a gift;
+			// they pause for admin resolution. Don't move the Gmail label —
+			// keep the email in Inbox so re-scans don't lose track of it.
+			if (outcome.reviewCandidates) {
+				updateRowForReview.run(
+					outcome.reviewReason ?? null,
+					JSON.stringify(outcome.reviewCandidates),
+					row.id
+				);
+				result.rowsRoutedToReview += 1;
+				continue;
+			}
+
 			updateRow.run('accepted', outcome.giftId, outcome.error, row.id);
 			if (outcome.error) {
 				// Outcome surfaced a soft failure (e.g., tracking-number mismatch
@@ -452,19 +481,78 @@ export async function commitTrackingReviewedRows(
 		entityType: 'import',
 		entityId: 0, // batch operation, not tied to a single run
 		action: 'tracking_commit',
-		summary: `Tracking commit: ${result.giftsCreated} created, ${result.giftsLinked} linked, ${result.rowsSkipped} skipped, ${result.rowsFailed} failed`
+		summary: `Tracking commit: ${result.giftsCreated} created, ${result.giftsLinked} linked, ${result.rowsSkipped} skipped, ${result.rowsFailed} failed${result.rowsRoutedToReview > 0 ? `, ${result.rowsRoutedToReview} routed to review` : ''}`
 	});
 
 	return result;
 }
 
-interface AcceptOutcome {
+interface ReviewCandidate {
 	giftId: number;
-	created: boolean;
-	error: string | null;
+	title: string;
+	personId: number;
+	personDisplayName: string;
+	vendorName: string | null;
+	status: string;
+	createdAt: string;
 }
 
-async function acceptTrackingRow(row: ImportRow, userId: number): Promise<AcceptOutcome> {
+// td-3d1ee6: gifts that share the given order_id. Used when an order# match
+// exists but vendor/sender evidence is ambiguous — surface candidates to the
+// admin instead of silently creating a duplicate self-package.
+function findReviewCandidatesByOrderId(orderId: string): ReviewCandidate[] {
+	const db = getDb();
+	const rows = db
+		.prepare<
+			[string],
+			{
+				id: number;
+				title: string;
+				person_id: number;
+				display_name: string;
+				vendor_name: string | null;
+				status: string;
+				created_at: string;
+			}
+		>(
+			`SELECT g.id, g.title, g.person_id, p.display_name,
+			        v.name AS vendor_name, g.status, g.created_at
+			   FROM gifts g
+			   JOIN people p ON p.id = g.person_id
+			   LEFT JOIN vendors v ON v.id = g.vendor_id
+			  WHERE g.order_id = ? AND g.is_archived = 0
+			  ORDER BY g.id DESC
+			  LIMIT 10`
+		)
+		.all(orderId);
+	return rows.map((r) => ({
+		giftId: r.id,
+		title: r.title,
+		personId: r.person_id,
+		personDisplayName: r.display_name,
+		vendorName: r.vendor_name,
+		status: r.status,
+		createdAt: r.created_at
+	}));
+}
+
+interface AcceptOutcome {
+	giftId: number; // 0 when reviewCandidates is set (no gift created/linked yet)
+	created: boolean;
+	error: string | null;
+	// td-3d1ee6: when present, the importer detected an order# match but
+	// couldn't confidently auto-attach. Caller persists candidates to
+	// match_candidates_json and sets disposition='review' for admin
+	// resolution via /admin/imports/tracking/review.
+	reviewCandidates?: ReviewCandidate[];
+	reviewReason?: string;
+}
+
+async function acceptTrackingRow(
+	row: ImportRow,
+	userId: number,
+	options: { bypassReview?: boolean } = {}
+): Promise<AcceptOutcome> {
 	const db = getDb();
 	const trackingNumber = row.parsed_tracking_number!.trim();
 
@@ -545,12 +633,34 @@ async function acceptTrackingRow(row: ImportRow, userId: number): Promise<Accept
 		}
 	}
 
+	// 2c. td-3d1ee6: order# matches some gift but evidence (vendor/sender/
+	//     self-actor) didn't agree → route to review queue instead of
+	//     silently fabricating a self-package. This is the "weak match"
+	//     case where the importer found candidates but isn't confident.
+	//     Bypassed when the admin has explicitly resolved a review row by
+	//     choosing "create new self-package" — at that point they've seen
+	//     the candidates and decided none apply.
+	if (row.parsed_order_id && !options.bypassReview) {
+		const candidates = findReviewCandidatesByOrderId(row.parsed_order_id);
+		if (candidates.length > 0) {
+			console.info(
+				`[tracking-import] order# match without sender agreement: order_id=${row.parsed_order_id} sender=${row.parsed_sender_domain ?? '∅'} tracking=${trackingNumber} candidate_gifts=[${candidates.map((c) => c.giftId).join(',')}] — routing to review.`
+			);
+			return {
+				giftId: 0,
+				created: false,
+				error: null,
+				reviewCandidates: candidates,
+				reviewReason: `Order #${row.parsed_order_id} matched ${candidates.length} existing gift(s) but vendor/sender evidence was ambiguous. Pick the correct match or create a new self-package.`
+			};
+		}
+	}
+
 	// 3. Create a new self-package owned by the actor.
 	//
 	// td-3d1ee6: log the unmatched-tracking event so orphan creations are
-	// auditable in pm2 logs. If this fires when we believed an existing
-	// gift should have matched, the order_id + sender shape + the actor's
-	// self-package presence are enough to retrace the miss.
+	// auditable in pm2 logs. With clause 2c in place, this path now only
+	// fires when truly no candidate gift exists (order# not in DB at all).
 	console.warn(
 		`[tracking-import] orphan self-package: no match on order_id=${row.parsed_order_id ?? '∅'} sender=${row.parsed_sender_domain ?? '∅'} tracking=${trackingNumber} — creating new self-package.`
 	);
@@ -592,7 +702,11 @@ async function acceptTrackingRow(row: ImportRow, userId: number): Promise<Accept
  * self-package in status='ordered' that the eventual carrier shipment email
  * will upgrade via the existing order_id-match path in acceptTrackingRow.
  */
-async function acceptOrderConfirmationRow(row: ImportRow, userId: number): Promise<AcceptOutcome> {
+async function acceptOrderConfirmationRow(
+	row: ImportRow,
+	userId: number,
+	options: { bypassReview?: boolean } = {}
+): Promise<AcceptOutcome> {
 	const db = getDb();
 	const orderId = row.parsed_order_id!.trim();
 
@@ -633,6 +747,26 @@ async function acceptOrderConfirmationRow(row: ImportRow, userId: number): Promi
 		return { giftId: existing.id, created: false, error: null };
 	}
 
+	// td-3d1ee6: before fabricating a self-package, check whether the order#
+	// matches any gift at all (even without sender agreement). If so, route
+	// to review so the admin can pick the correct match instead of creating
+	// a duplicate. Only reachable when the sender-domain path above missed.
+	// Bypassed when admin explicitly chose "create new self-package" from
+	// the review UI — they've seen the candidates and decided none apply.
+	const candidates = options.bypassReview ? [] : findReviewCandidatesByOrderId(orderId);
+	if (candidates.length > 0) {
+		console.info(
+			`[tracking-import] order-confirmation match without sender agreement: order_id=${orderId} sender=${row.parsed_sender_domain ?? '∅'} candidate_gifts=[${candidates.map((c) => c.giftId).join(',')}] — routing to review.`
+		);
+		return {
+			giftId: 0,
+			created: false,
+			error: null,
+			reviewCandidates: candidates,
+			reviewReason: `Order #${orderId} matched ${candidates.length} existing gift(s) but vendor/sender evidence was ambiguous. Pick the correct match or create a new self-package.`
+		};
+	}
+
 	// Create a status='ordered' self-package. No Shippo call — there's nothing
 	// to register yet. Title prefers the email subject; falls back to merchant
 	// or sender domain if subject is missing.
@@ -664,6 +798,163 @@ async function acceptOrderConfirmationRow(row: ImportRow, userId: number): Promi
 		userId
 	);
 	return { giftId: gift.id, created: true, error: null };
+}
+
+// ---------------------------------------------------------------------------
+// td-3d1ee6: review-queue resolution
+//
+// When the importer routes a row to disposition='review' (order# match but
+// vendor/sender evidence was ambiguous), the admin resolves it via the
+// tracking review UI. Three actions are possible:
+//   - attach        — link the row to one of the candidate gifts (and patch
+//                     tracking# / carrier / shipper on the gift if it's a
+//                     shipment row, register Shippo).
+//   - self_package  — create a new self-package as if the candidates didn't
+//                     exist (re-runs the accept path with bypassReview).
+//   - skip          — same as the normal pending-skip action.
+
+export interface ResolveTrackingReviewInput {
+	rowId: number;
+	action: 'attach' | 'self_package' | 'skip';
+	giftId?: number; // required when action === 'attach'
+}
+
+export async function resolveTrackingReview(
+	userId: number,
+	inputs: ResolveTrackingReviewInput[]
+): Promise<CommitTrackingResult> {
+	const db = getDb();
+	const result: CommitTrackingResult = {
+		giftsCreated: 0,
+		giftsLinked: 0,
+		rowsSkipped: 0,
+		rowsFailed: 0,
+		rowsRoutedToReview: 0,
+		labelMoveFailures: 0
+	};
+
+	// Same defense-in-depth as commitTrackingReviewedRows: JOIN to import_runs
+	// and require tracking_email source. Also require disposition='review' so
+	// a crafted POST can't re-resolve already-accepted rows.
+	const rowStmt = db.prepare<[number], ImportRow>(
+		`SELECT ir.* FROM import_rows ir
+		   JOIN import_runs r ON r.id = ir.import_run_id
+		  WHERE ir.id = ? AND r.source = 'tracking_email'
+		    AND ir.disposition = 'review'`
+	);
+	const updateRow = db.prepare(
+		`UPDATE import_rows
+		    SET disposition = ?, gift_id = ?, error_message = ?,
+		        updated_at = CURRENT_TIMESTAMP
+		  WHERE id = ?`
+	);
+
+	const messagesToMove: string[] = [];
+
+	for (const input of inputs) {
+		const row = rowStmt.get(input.rowId);
+		if (!row) continue;
+
+		const isOrderConfirmation = row.email_type === 'order_confirmation';
+
+		try {
+			if (input.action === 'skip') {
+				updateRow.run('skipped', row.gift_id, null, row.id);
+				result.rowsSkipped += 1;
+				messagesToMove.push(row.source_message_id);
+				continue;
+			}
+
+			if (input.action === 'attach') {
+				if (!input.giftId) {
+					throw new Error('attach action requires a giftId');
+				}
+				const gift = getGiftById(input.giftId);
+				if (!gift || gift.is_archived === 1) {
+					throw new Error(`Gift #${input.giftId} not found or archived.`);
+				}
+				// Sanity-check: the chosen gift's order_id must match the row's
+				// parsed_order_id. The UI only offers candidates from the
+				// importer's own match_candidates_json, but a stale page or
+				// forged POST could supply something else.
+				if (!row.parsed_order_id || gift.order_id !== row.parsed_order_id) {
+					throw new Error(
+						`Gift #${gift.id} order_id (${gift.order_id ?? '∅'}) does not match row order_id (${row.parsed_order_id ?? '∅'}).`
+					);
+				}
+
+				if (isOrderConfirmation) {
+					// No tracking# in the email — just link the row to the gift.
+					updateRow.run('accepted', gift.id, null, row.id);
+					result.giftsLinked += 1;
+				} else {
+					// Patch tracking#/carrier/shipper on the chosen gift, mirroring
+					// step 2 of acceptTrackingRow.
+					const trackingNumber = row.parsed_tracking_number!.trim();
+					let softError: string | null = null;
+					if (
+						gift.tracking_provider_id &&
+						gift.tracking_number &&
+						gift.tracking_number.trim() !== trackingNumber
+					) {
+						softError = `Existing gift #${gift.id} has a different registered tracking number (${gift.tracking_number}); reconcile manually.`;
+					} else {
+						const patch: Parameters<typeof updateGift>[1] = {};
+						if (!gift.tracking_number) patch.tracking_number = trackingNumber;
+						if (!gift.carrier && row.parsed_carrier) patch.carrier = row.parsed_carrier;
+						if (!gift.shipper_id && row.parsed_carrier) {
+							const shipper = getShipperByName(row.parsed_carrier);
+							if (shipper) patch.shipper_id = shipper.id;
+						}
+						if (Object.keys(patch).length > 0) {
+							updateGift(gift.id, patch, userId);
+						}
+						await registerWithProvider(gift.id, userId);
+					}
+					updateRow.run('accepted', gift.id, softError, row.id);
+					if (softError) result.rowsFailed += 1;
+					else result.giftsLinked += 1;
+				}
+				messagesToMove.push(row.source_message_id);
+				continue;
+			}
+
+			// action === 'self_package' — admin saw the candidates and decided
+			// none apply. Re-run the accept path with bypassReview so it skips
+			// straight to step 3 (self-package fabrication).
+			const outcome = isOrderConfirmation
+				? await acceptOrderConfirmationRow(row, userId, { bypassReview: true })
+				: await acceptTrackingRow(row, userId, { bypassReview: true });
+			updateRow.run('accepted', outcome.giftId, outcome.error, row.id);
+			if (outcome.error) result.rowsFailed += 1;
+			else if (outcome.created) result.giftsCreated += 1;
+			else result.giftsLinked += 1;
+			messagesToMove.push(row.source_message_id);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			updateRow.run('failed', row.gift_id, message, row.id);
+			result.rowsFailed += 1;
+		}
+	}
+
+	if (messagesToMove.length > 0) {
+		try {
+			await batchMoveToLabel(userId, messagesToMove, INBOX_LABEL, PROCESSED_LABEL);
+		} catch (err) {
+			console.warn('[tracking-import] batch label move failed:', err);
+			result.labelMoveFailures = messagesToMove.length;
+		}
+	}
+
+	logAudit({
+		actorUserId: userId,
+		entityType: 'import',
+		entityId: 0,
+		action: 'tracking_review_resolve',
+		summary: `Tracking review: ${result.giftsCreated} created, ${result.giftsLinked} linked, ${result.rowsSkipped} skipped, ${result.rowsFailed} failed`
+	});
+
+	return result;
 }
 
 /**
@@ -741,6 +1032,7 @@ export interface TrackingRunSummary extends ImportRun {
 	pending_count: number;
 	failed_count: number;
 	accepted_count: number;
+	review_count: number;
 }
 
 export function listRecentTrackingRuns(limit = 20): TrackingRunSummary[] {
@@ -750,7 +1042,8 @@ export function listRecentTrackingRuns(limit = 20): TrackingRunSummary[] {
 			`SELECT r.*,
 			        (SELECT COUNT(*) FROM import_rows WHERE import_run_id = r.id AND disposition = 'pending') AS pending_count,
 			        (SELECT COUNT(*) FROM import_rows WHERE import_run_id = r.id AND disposition = 'failed') AS failed_count,
-			        (SELECT COUNT(*) FROM import_rows WHERE import_run_id = r.id AND disposition = 'accepted') AS accepted_count
+			        (SELECT COUNT(*) FROM import_rows WHERE import_run_id = r.id AND disposition = 'accepted') AS accepted_count,
+			        (SELECT COUNT(*) FROM import_rows WHERE import_run_id = r.id AND disposition = 'review') AS review_count
 			   FROM import_runs r
 			  WHERE r.source = 'tracking_email'
 			  ORDER BY r.started_at DESC

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { getDb } from './db';
 
 export interface GiftMatchCandidate {
@@ -14,6 +15,14 @@ export interface GiftMatchResult {
 	topId: number | null; // only set when confidence === 'strong'
 	confidence: GiftMatchConfidence;
 	candidates: GiftMatchCandidate[];
+	// td-1d01e9 Phase B: when populated, the LLM has reviewed the heuristic
+	// weak-match candidates and either confirmed one (confirmedGiftId set) or
+	// rejected all (confirmedGiftId === null). UI prefers this verdict over
+	// raw weak-match candidates when present.
+	llmVerdict?: {
+		confirmedGiftId: number | null;
+		reason: string;
+	};
 }
 
 const STRONG_THRESHOLD = 0.6;
@@ -138,6 +147,10 @@ export function scoreGiftCandidates(
  * gifts that haven't been linked to an order yet. Lets the review UI propose
  * "this email looks like the Endoscope idea you logged for Benjamin" when
  * Amazon's emails strip recipient and gift designation.
+ *
+ * td-1d01e9 Phase B: for weak matches, also consults the matcher_llm_cache
+ * (synchronous DB lookup only, never blocks on the Anthropic API). Cache
+ * is warmed by the admin-triggered re-evaluate action.
  */
 export function matchGiftByTitle(parsedTitle: string | null | undefined): GiftMatchResult {
 	const db = getDb();
@@ -151,5 +164,48 @@ export function matchGiftByTitle(parsedTitle: string | null | undefined): GiftMa
 			    AND g.status IN ('idea', 'planned')`
 		)
 		.all();
-	return scoreGiftCandidates(parsedTitle, rows);
+	const result = scoreGiftCandidates(parsedTitle, rows);
+	if (result.confidence === 'weak' && parsedTitle) {
+		const cached = readLlmCacheForCandidates(parsedTitle, result.candidates);
+		if (cached) result.llmVerdict = cached;
+	}
+	return result;
+}
+
+// td-1d01e9 Phase B: synchronous cache lookup. Matches the cache key
+// computation in matcher-llm.ts (sha1 of needle + sorted candidate titles).
+// Imported lazily via dynamic require to keep this module DB-aware but
+// API-key-agnostic.
+function readLlmCacheForCandidates(
+	needle: string,
+	candidates: GiftMatchCandidate[]
+): { confirmedGiftId: number | null; reason: string } | null {
+	if (candidates.length === 0) return null;
+	const sortedTitles = candidates
+		.map((c) => c.title.trim().toLowerCase())
+		.sort()
+		.join('|');
+	const key = createHash('sha1')
+		.update(`${needle.trim().toLowerCase()}::${sortedTitles}`)
+		.digest('hex');
+	const row = getDb()
+		.prepare<[string], { response: string }>(
+			'SELECT response FROM matcher_llm_cache WHERE cache_key = ?'
+		)
+		.get(key);
+	if (!row) return null;
+	try {
+		const parsed = JSON.parse(row.response) as {
+			bestIndex: number | null;
+			reason: string;
+		};
+		if (parsed.bestIndex === null) {
+			return { confirmedGiftId: null, reason: parsed.reason ?? '' };
+		}
+		const winner = candidates[parsed.bestIndex];
+		if (!winner) return null;
+		return { confirmedGiftId: winner.giftId, reason: parsed.reason ?? '' };
+	} catch {
+		return null;
+	}
 }

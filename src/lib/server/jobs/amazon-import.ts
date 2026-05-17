@@ -16,7 +16,9 @@ import { transitionGift, canTransition } from './../gift-status';
 import {
 	getOrderByOrderId,
 	listGiftsForOrder,
-	upsertOrderByOrderId
+	matchSiblingsToShipment,
+	upsertOrderByOrderId,
+	upsertShipment
 } from '../orders';
 import type { ParsedAmazonItem } from '../amazon-parser';
 import type {
@@ -724,10 +726,18 @@ function commitMultiItemAccept(
 }
 
 function applyLifecycleEvent(giftId: number, row: ImportRow, userId: number): void {
-	// td-3e9ae2: an order can fan out to N gifts (multi-recipient case). When
-	// the shipped/delivered email lands, advance every sibling gift under the
-	// same order, not just the one resolveOrCreateGift returned. Falls back
-	// to single-gift behavior when no parent order exists (legacy gifts).
+	// td-3e9ae2 / td-d08902: an order can fan out to N gifts (multi-recipient
+	// case) and can ship in multiple batches. Lifecycle handling:
+	//
+	//   order_placed: refresh order facts; advance ALL siblings to 'ordered'
+	//                 (no shipment yet, applies to whole order).
+	//   shipped:      create/find an order_shipments row from the email's
+	//                 tracking facts; advance ONLY the siblings whose titles
+	//                 match items in this shipment's email body. If the
+	//                 email doesn't enumerate items (single-item shipping
+	//                 notification), advance all siblings as before.
+	//   delivered:    same as shipped, but bumps delivered_at on shipment +
+	//                 advances matched siblings to 'delivered'.
 	const seed = getGiftById(giftId);
 	if (!seed) return;
 	let siblings: Gift[] = [seed];
@@ -741,24 +751,73 @@ function applyLifecycleEvent(giftId: number, row: ImportRow, userId: number): vo
 	if (row.parsed_order_id) ensureOrderForRow(row, userId);
 
 	const target = lifecycleStatus(row.email_type);
+	const isShipmentEvent = row.email_type === 'shipped' || row.email_type === 'delivered';
+
+	// td-d08902: for shipment events on a known parent order, capture the
+	// shipment row first, then narrow siblings to those actually in this box.
+	let shipmentId: number | null = null;
+	let advanceSiblings = siblings;
+	if (isShipmentEvent && seed.order_pk) {
+		const shipmentItems = parseRowItems(row);
+		const shippedTitles = shipmentItems.map((it) => it.title).filter((t): t is string => !!t);
+		const { matched, itemsHadTitles } = matchSiblingsToShipment(siblings, shippedTitles);
+		if (itemsHadTitles && matched.length === 0) {
+			// Items enumerated but none fuzzy-matched — fall back to advancing
+			// all siblings rather than no-op'ing, but log so the parser/matcher
+			// gap is visible. Real failure mode would be Amazon renaming items
+			// in the shipping notification body.
+			console.warn(
+				`[amazon-import] shipment items present but no sibling match: order=${row.parsed_order_id ?? '∅'} items=${JSON.stringify(shippedTitles)} sibling_titles=${JSON.stringify(siblings.map((s) => s.title))}`
+			);
+			advanceSiblings = siblings;
+		} else {
+			advanceSiblings = matched;
+		}
+
+		shipmentId = upsertShipment({
+			order_pk: seed.order_pk,
+			tracking_number: row.parsed_tracking_number,
+			carrier: row.parsed_carrier,
+			amazon_tracking_url: row.parsed_amazon_tracking_url,
+			shipped_at: row.email_type === 'shipped' ? (row.received_at ?? null) : null,
+			delivered_at: row.email_type === 'delivered' ? (row.received_at ?? null) : null,
+			source_message_id: row.source_message_id,
+			items_json: row.parsed_items_json
+		});
+	}
+
 	for (const current of siblings) {
+		const isAdvancing = advanceSiblings.some((s) => s.id === current.id);
+
 		// Merge newly-parsed fields that the first email may have missed.
+		// For shipment events, only patch siblings actually in this shipment
+		// (others may belong to a different box with different tracking).
 		const patch: Parameters<typeof updateGift>[1] = {};
-		if (row.parsed_tracking_number && !current.tracking_number) patch.tracking_number = row.parsed_tracking_number;
-		if (row.parsed_carrier && !current.carrier) patch.carrier = row.parsed_carrier;
+		if (isAdvancing) {
+			if (row.parsed_tracking_number && !current.tracking_number) patch.tracking_number = row.parsed_tracking_number;
+			if (row.parsed_carrier && !current.carrier) patch.carrier = row.parsed_carrier;
+			if (row.parsed_amazon_tracking_url && !current.amazon_tracking_url) {
+				patch.amazon_tracking_url = row.parsed_amazon_tracking_url;
+			}
+		}
 		// Don't overwrite per-line price with order total on multi-item orders.
 		if (row.parsed_price_cents && !current.price_cents && !current.order_pk) {
 			patch.price_cents = row.parsed_price_cents;
 		}
 		if (row.parsed_order_id && !current.order_id) patch.order_id = row.parsed_order_id;
-		if (row.parsed_amazon_tracking_url && !current.amazon_tracking_url) {
-			patch.amazon_tracking_url = row.parsed_amazon_tracking_url;
-		}
 		if (Object.keys(patch).length > 0) {
 			updateGift(current.id, patch, userId);
 		}
 
-		if (target) {
+		// td-d08902: attach the gift to this shipment so the per-recipient UI
+		// can later show "shipped via UPS 1Z…" per sibling.
+		if (shipmentId && isAdvancing && !current.shipment_id) {
+			getDb()
+				.prepare('UPDATE gifts SET shipment_id = ? WHERE id = ?')
+				.run(shipmentId, current.id);
+		}
+
+		if (target && isAdvancing) {
 			const fresh = getGiftById(current.id)!;
 			if (canTransition(fresh.status, target)) {
 				transitionGift(current.id, target, userId);

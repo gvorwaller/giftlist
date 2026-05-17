@@ -96,13 +96,26 @@ export interface Gift {
 	order_pk: number | null;
 	/** td-3e9ae2: 0..N-1 position within a multi-item Amazon order. */
 	line_item_index: number | null;
+	/** td-d08902: FK to order_shipments row when this gift has shipped under
+	 * a known shipment. Multi-shipment orders attach distinct gifts to
+	 * distinct shipments. Null = not yet shipped or pre-migration legacy. */
+	shipment_id: number | null;
+	/** td-dc1846: when this gift was archived (set by archiveGift), so the
+	 * admin browser can sort by archive time. Null when not archived; older
+	 * archived rows backfilled with updated_at as best-effort. */
+	archived_at: string | null;
 	created_at: string;
 	updated_at: string;
 }
 
 /** td-3e9ae2: one row per real-world Amazon order. Owns the order-level
  * tracking + lifecycle facts that used to be denormalized onto each gift.
- * Gifts FK back via `gifts.order_pk`. */
+ * Gifts FK back via `gifts.order_pk`.
+ *
+ * td-d08902: the tracking_* / shipped_at / delivered_at columns here are
+ * a denormalized summary of the "primary/most recent" shipment for legacy
+ * read compatibility. Authoritative per-shipment data now lives in
+ * `order_shipments` (one row per real shipment). */
 export interface Order {
 	id: number;
 	order_id: string;
@@ -121,6 +134,27 @@ export interface Order {
 	delivered_at: string | null;
 	source_message_id: string | null;
 	notes: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+/** td-d08902: one row per real shipment. Multi-recipient Amazon orders
+ * that ship in batches get one of these per box. Gifts attach via
+ * `gifts.shipment_id` so per-recipient status reflects actual delivery. */
+export interface OrderShipment {
+	id: number;
+	order_pk: number;
+	tracking_number: string | null;
+	carrier: string | null;
+	tracking_provider_id: string | null;
+	tracking_status: string | null;
+	tracking_status_at: string | null;
+	tracking_estimated_delivery: string | null;
+	amazon_tracking_url: string | null;
+	shipped_at: string | null;
+	delivered_at: string | null;
+	source_message_id: string | null;
+	items_json: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -221,7 +255,10 @@ export type EmailType =
 	| 'tracking_only'
 	| 'order_confirmation';
 
-export type ImportRowDisposition = 'pending' | 'accepted' | 'skipped' | 'failed';
+// 'review' (td-3d1ee6): the importer detected an order# match but vendor/
+// sender evidence disagreed. Routed here for manual resolution instead of
+// silently fabricating a duplicate self-package. See migrations/019.
+export type ImportRowDisposition = 'pending' | 'accepted' | 'skipped' | 'failed' | 'review';
 export type MatchConfidence = 'exact' | 'alias' | 'fuzzy' | 'none';
 
 export interface ImportRow {

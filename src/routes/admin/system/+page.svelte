@@ -219,6 +219,18 @@
 			</table>
 		{/if}
 	</section>
+
+	<!-- td-dc1846 -->
+	<section class="card">
+		<p class="eyebrow">Archived</p>
+		<p class="body">
+			Browse and restore archived gifts across all recipients. Useful when
+			you need to find an archive without navigating through the person.
+		</p>
+		<p>
+			<a href="/admin/system/archived" class="link">Open archived packages →</a>
+		</p>
+	</section>
 </main>
 
 <style>

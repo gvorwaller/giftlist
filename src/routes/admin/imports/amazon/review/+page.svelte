@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import type { ActionData, PageData } from './$types';
+	import PersonPicker from '$lib/components/PersonPicker.svelte';
 
 	interface Props {
 		data: PageData;
@@ -33,17 +34,31 @@
 	const pending = $derived(data.rows.filter((r) => r.disposition === 'pending'));
 	const handled = $derived(data.rows.filter((r) => r.disposition !== 'pending'));
 
-	// td-3e9ae2: per-row state for the "Apply same recipient to all" shortcut
-	// on multi-item Amazon orders. Map<rowId, applyAll>.
+	// td-3e9ae2 / td-77a119: per-row state for the "Apply same recipient to all"
+	// shortcut + the per-line-item recipient pickers. State-driven (was
+	// DOM-driven against native <select>) so the new PersonPicker combobox
+	// works without manual DOM access.
 	let applyAllSelected = $state<Record<number, boolean>>({});
-	let applyAllPerson = $state<Record<number, string>>({});
+	let applyAllPerson = $state<Record<number, number | null>>({});
+	let lineSelections = $state<Record<string, number | null>>({}); // key = `${rowId}:${idx}`
+	let singleSelections = $state<Record<number, number | null>>({}); // key = rowId
+
+	// Seed singleSelections from each row's existing match_person_id so the
+	// PersonPicker shows the importer's auto-match suggestion on first render.
+	$effect(() => {
+		for (const row of data.rows) {
+			if (singleSelections[row.id] === undefined) {
+				singleSelections[row.id] = row.match_person_id ?? null;
+			}
+		}
+	});
+
 	function syncLineItemPickers(rowId: number, count: number) {
-		// When "apply same to all" is on and a person is chosen, set every
-		// line-item picker's value to the same id (visual + form-data).
-		const pid = applyAllPerson[rowId] ?? '';
+		// When "apply same to all" is on and a person is chosen, propagate
+		// to every line-item picker for this row.
+		const pid = applyAllPerson[rowId] ?? null;
 		for (let i = 0; i < count; i++) {
-			const el = document.querySelector<HTMLSelectElement>(`select[name="lineperson_${rowId}_${i}"]`);
-			if (el) el.value = pid;
+			lineSelections[`${rowId}:${i}`] = pid;
 		}
 	}
 
@@ -61,6 +76,13 @@
 	const flashReassigned = $derived(Number($page.url.searchParams.get('reassigned') ?? '0'));
 	const flashRetried = $derived(Number($page.url.searchParams.get('retried') ?? '0'));
 	const flashRematched = $derived(Number($page.url.searchParams.get('rematched') ?? '0'));
+	// td-1d01e9 Phase B: LLM re-evaluate flash params.
+	const flashLlmSkipped = $derived($page.url.searchParams.get('llm_skipped') === '1');
+	const flashLlmEval = $derived(Number($page.url.searchParams.get('llm_evaluated') ?? '0'));
+	const flashLlmConfirmed = $derived(Number($page.url.searchParams.get('llm_confirmed') ?? '0'));
+	const flashLlmRejected = $derived(Number($page.url.searchParams.get('llm_rejected') ?? '0'));
+	const flashLlmCalls = $derived(Number($page.url.searchParams.get('llm_api_calls') ?? '0'));
+	const flashLlmErrors = $derived(Number($page.url.searchParams.get('llm_errors') ?? '0'));
 
 	const failedWithOrder = $derived(
 		data.rows.filter((r) => r.disposition === 'failed' && r.parsed_order_id)
@@ -115,6 +137,32 @@
 
 	{#if form?.error}
 		<div class="flash err" role="alert">{form.error}</div>
+	{/if}
+
+	<!-- td-1d01e9 Phase B: LLM re-evaluation flash + admin trigger -->
+	{#if flashLlmSkipped}
+		<div class="flash err" role="alert">
+			AI re-evaluation skipped: <code>ANTHROPIC_API_KEY</code> is not set on the server.
+			Add it to <code>.env</code> and restart, or stick with heuristic matching only.
+		</div>
+	{:else if flashLlmEval > 0}
+		<div class="flash ok" role="status">
+			AI re-evaluated {flashLlmEval} weak match{flashLlmEval === 1 ? '' : 'es'} —
+			<strong>{flashLlmConfirmed} confirmed</strong>, {flashLlmRejected} rejected
+			({flashLlmCalls} API call{flashLlmCalls === 1 ? '' : 's'}{flashLlmErrors > 0
+				? `, ${flashLlmErrors} errors`
+				: ''}).
+		</div>
+	{/if}
+
+	{#if pending.length > 0}
+		<form method="POST" action="?/reevaluateMatches" class="llm-tools">
+			<input type="hidden" name="run_id" value={data.run.id} />
+			<button type="submit" class="ghost">Re-evaluate weak matches with AI</button>
+			<span class="muted-inline">
+				Asks Haiku to confirm or reject weak gift-match suggestions. ~$0.001/row, cached.
+			</span>
+		</form>
 	{/if}
 
 	{#if pending.length === 0}
@@ -194,16 +242,15 @@
 									/>
 									<span>Same recipient for all {items.length}</span>
 									{#if applyAllSelected[r.id]}
-										<select
-											class="apply-all-person"
-											bind:value={applyAllPerson[r.id]}
-											onchange={() => syncLineItemPickers(r.id, items.length)}
-										>
-											<option value="">— choose —</option>
-											{#each data.people as p (p.id)}
-												<option value={String(p.id)}>{p.display_name}</option>
-											{/each}
-										</select>
+										<div class="apply-all-picker">
+											<PersonPicker
+												people={data.people}
+												bind:value={applyAllPerson[r.id]}
+												name="_apply_all_{r.id}"
+												placeholder="— choose —"
+												onchange={() => syncLineItemPickers(r.id, items.length)}
+											/>
+										</div>
 									{/if}
 								</label>
 								<ul class="line-list">
@@ -216,12 +263,12 @@
 											</div>
 											<label class="line-pick">
 												<span class="lbl">Recipient</span>
-												<select name="lineperson_{r.id}_{idx}" required>
-													<option value="">— choose —</option>
-													{#each data.people as p (p.id)}
-														<option value={String(p.id)}>{p.display_name}</option>
-													{/each}
-												</select>
+												<PersonPicker
+													people={data.people}
+													bind:value={lineSelections[`${r.id}:${idx}`]}
+													name="lineperson_{r.id}_{idx}"
+													placeholder="— choose —"
+												/>
 											</label>
 											{#if lineMatch && lineMatch.candidates.length > 0}
 												<fieldset class="line-gift">
@@ -301,16 +348,29 @@
 										{giftCandidates.length === 1 ? 'gift' : 'gift idea'}
 										{#if giftMatch?.confidence === 'strong'}
 											<span class="badge strong">strong match</span>
+										{:else if giftMatch?.llmVerdict?.confirmedGiftId}
+											<!-- td-1d01e9 Phase B: AI confirmed one weak candidate -->
+											<span class="badge ai-confirmed">AI confirmed</span>
+										{:else if giftMatch?.llmVerdict && giftMatch.llmVerdict.confirmedGiftId === null}
+											<!-- td-1d01e9 Phase B: AI rejected all weak candidates -->
+											<span class="badge ai-rejected">AI rejected</span>
 										{:else}
 											<span class="badge weak">weak match</span>
 										{/if}
 									</legend>
+									{#if giftMatch?.llmVerdict}
+										<p class="ai-reason">
+											<em>AI:</em>
+											{giftMatch.llmVerdict.reason}
+										</p>
+									{/if}
 									<label class="gift-radio">
 										<input
 											type="radio"
 											name="gift_{r.id}"
 											value=""
-											checked={giftMatch?.confidence !== 'strong'}
+											checked={giftMatch?.confidence !== 'strong' &&
+												!giftMatch?.llmVerdict?.confirmedGiftId}
 										/>
 										<span>Don't link — create a new gift</span>
 									</label>
@@ -320,12 +380,16 @@
 												type="radio"
 												name="gift_{r.id}"
 												value={String(g.giftId)}
-												checked={giftMatch?.topId === g.giftId}
+												checked={giftMatch?.topId === g.giftId ||
+													giftMatch?.llmVerdict?.confirmedGiftId === g.giftId}
 											/>
 											<span>
 												<strong>{g.title}</strong>
 												<span class="muted">→ {g.personDisplayName}</span>
 												<span class="score">{Math.round(g.score * 100)}%</span>
+												{#if giftMatch?.llmVerdict?.confirmedGiftId === g.giftId}
+													<span class="badge ai-pill">AI pick</span>
+												{/if}
 											</span>
 										</label>
 									{/each}
@@ -339,17 +403,12 @@
 							{#if !isMultiItem}
 								<label class="person-select">
 									<span class="label">Or assign to person</span>
-									<select name="person_{r.id}">
-										<option value="">— unassigned —</option>
-										{#each data.people as p (p.id)}
-											<option
-												value={String(p.id)}
-												selected={r.match_person_id === p.id}
-											>
-												{p.display_name}{#if p.full_name && p.full_name !== p.display_name} ({p.full_name}){/if}
-											</option>
-										{/each}
-									</select>
+									<PersonPicker
+										people={data.people}
+										bind:value={singleSelections[r.id]}
+										name="person_{r.id}"
+										placeholder="— unassigned —"
+									/>
 									{#if r.match_person_id && r.match_confidence}
 										<span class="hint">
 											{r.match_confidence} match
@@ -730,13 +789,9 @@
 		height: 22px;
 		accent-color: var(--amber);
 	}
-	.line-items .apply-all-person {
-		min-height: 44px;
-		padding: 6px 10px;
-		border-radius: var(--radius-control);
-		border: 1px solid var(--line);
-		background: var(--paper);
-		font-size: 15px;
+	.line-items .apply-all-picker {
+		flex: 1 1 200px;
+		min-width: 0;
 	}
 	.line-list {
 		list-style: none;
@@ -858,6 +913,48 @@
 		background: var(--amber-soft);
 		color: var(--amber);
 		border: 1px solid var(--amber);
+	}
+	/* td-1d01e9 Phase B: LLM verdict badges */
+	.gift-link .badge.ai-confirmed {
+		background: var(--green);
+		color: var(--paper);
+	}
+	.gift-link .badge.ai-rejected {
+		background: var(--bg);
+		color: var(--muted);
+		border: 1px solid var(--line);
+	}
+	.gift-link .badge.ai-pill {
+		background: var(--green-soft);
+		color: var(--green);
+		font-size: 10px;
+		padding: 1px 8px;
+		margin-left: 8px;
+	}
+	.ai-reason {
+		font-family: var(--font-sans);
+		font-size: 12px;
+		color: var(--muted);
+		padding: 6px 10px;
+		background: var(--bg);
+		border-radius: var(--radius-control);
+		margin: 4px 0 8px;
+	}
+	.llm-tools {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
+		padding: 10px 12px;
+		background: var(--paper);
+		border: 1px dashed var(--line);
+		border-radius: var(--radius-control);
+		margin-bottom: 12px;
+	}
+	.llm-tools .muted-inline {
+		font-family: var(--font-sans);
+		font-size: 12px;
+		color: var(--muted);
 	}
 
 	.gift-radio {

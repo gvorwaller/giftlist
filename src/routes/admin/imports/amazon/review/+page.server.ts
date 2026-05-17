@@ -10,6 +10,7 @@ import {
 	type CommitRowInput
 } from '$server/jobs/amazon-import';
 import { matchGiftByTitle, type GiftMatchResult } from '$server/gift-matcher';
+import { reevaluateMatchesForRun } from '$server/matcher-llm';
 import type { ImportRow } from '$server/types';
 import type { ParsedAmazonItem } from '$server/amazon-parser';
 
@@ -186,6 +187,29 @@ export const actions: Actions = {
 			303,
 			`/admin/imports/amazon/review?run=${runId}&skipped=${result.rowsSkipped}`
 		);
+	},
+
+	// td-1d01e9 Phase B: ask Haiku to confirm/reject every pending row's weak
+	// gift-match candidates for this run. Cached results return instantly on
+	// re-runs (no re-billing). Cheap (~$0.001 per row).
+	reevaluateMatches: async ({ locals, request }) => {
+		if (!locals.user) throw redirect(303, '/login');
+		const fd = await request.formData();
+		const runId = Number(fd.get('run_id'));
+		if (!Number.isFinite(runId)) return fail(400, { error: 'Missing run id.' });
+		const result = await reevaluateMatchesForRun(runId);
+		const qs = new URLSearchParams();
+		qs.set('run', String(runId));
+		if (result.skippedNoKey) {
+			qs.set('llm_skipped', '1');
+		} else {
+			qs.set('llm_evaluated', String(result.evaluated));
+			qs.set('llm_confirmed', String(result.confirmed));
+			qs.set('llm_rejected', String(result.rejected));
+			qs.set('llm_api_calls', String(result.apiCalls));
+			if (result.apiErrors > 0) qs.set('llm_errors', String(result.apiErrors));
+		}
+		throw redirect(303, `/admin/imports/amazon/review?${qs.toString()}`);
 	},
 
 	// Re-evaluate this run's failed rows by parsed_order_id. If admin has since
