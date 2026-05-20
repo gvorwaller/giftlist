@@ -33,7 +33,17 @@
 	}
 
 	const pending = $derived(data.rows.filter((r) => r.disposition === 'pending'));
-	const handled = $derived(data.rows.filter((r) => r.disposition !== 'pending'));
+	// Wave 1 (Codex round 4 P2): held rows (abstained shipment commits)
+	// are split out so they always render in full with a first-class
+	// resolve panel — never capped or hidden in the handled list.
+	const isHeld = (r: (typeof data.rows)[number]) =>
+		r.disposition === 'accepted' &&
+		!!r.error_message &&
+		(r.email_type === 'shipped' || r.email_type === 'delivered');
+	const heldRows = $derived(data.rows.filter(isHeld));
+	const handled = $derived(
+		data.rows.filter((r) => r.disposition !== 'pending' && !isHeld(r))
+	);
 
 	// td-3e9ae2 / td-77a119: per-row state for the "Apply same recipient to all"
 	// shortcut + the per-line-item recipient pickers. State-driven (was
@@ -77,20 +87,29 @@
 		return c == null ? '' : `$${(c / 100).toFixed(2)}`;
 	}
 
-	const flashGifts = $derived(Number($page.url.searchParams.get('gifts') ?? '0'));
+	// Wave 1: split commit result counters. `created` = truly new gift
+	// rows; `linked` = existing siblings the dedup hooked into; `advanced`
+	// = sibling status forward-transitions; `abstained` = rows that
+	// committed but held their shipment status pending manual review.
+	const flashCreated = $derived(Number($page.url.searchParams.get('created') ?? '0'));
+	const flashLinked = $derived(Number($page.url.searchParams.get('linked') ?? '0'));
+	const flashAdvanced = $derived(Number($page.url.searchParams.get('advanced') ?? '0'));
+	const flashAbstained = $derived(Number($page.url.searchParams.get('abstained') ?? '0'));
 	const flashSkipped = $derived(Number($page.url.searchParams.get('skipped') ?? '0'));
 	const flashFailed = $derived(Number($page.url.searchParams.get('failed') ?? '0'));
 	const flashMoveFails = $derived(Number($page.url.searchParams.get('move_failures') ?? '0'));
 	const flashReassigned = $derived(Number($page.url.searchParams.get('reassigned') ?? '0'));
 	const flashRetried = $derived(Number($page.url.searchParams.get('retried') ?? '0'));
 	const flashRematched = $derived(Number($page.url.searchParams.get('rematched') ?? '0'));
-	// td-1d01e9 Phase B: LLM re-evaluate flash params.
+	const flashResolvedHeld = $derived($page.url.searchParams.get('resolved_held'));
+	const flashCommitTotal = $derived(
+		flashCreated + flashLinked + flashSkipped + flashFailed + flashAbstained
+	);
+	// Wave 1: LLM re-run flash params (new shape — see reevaluateImportRowsForRun).
 	const flashLlmSkipped = $derived($page.url.searchParams.get('llm_skipped') === '1');
 	const flashLlmEval = $derived(Number($page.url.searchParams.get('llm_evaluated') ?? '0'));
-	const flashLlmConfirmed = $derived(Number($page.url.searchParams.get('llm_confirmed') ?? '0'));
-	const flashLlmRejected = $derived(Number($page.url.searchParams.get('llm_rejected') ?? '0'));
-	const flashLlmCalls = $derived(Number($page.url.searchParams.get('llm_api_calls') ?? '0'));
-	const flashLlmErrors = $derived(Number($page.url.searchParams.get('llm_errors') ?? '0'));
+	const flashLlmSucceeded = $derived(Number($page.url.searchParams.get('llm_succeeded') ?? '0'));
+	const flashLlmFailed = $derived(Number($page.url.searchParams.get('llm_failed') ?? '0'));
 
 	const failedWithOrder = $derived(
 		data.rows.filter((r) => r.disposition === 'failed' && r.parsed_order_id)
@@ -113,13 +132,14 @@
 		</p>
 	</header>
 
-	{#if flashGifts + flashSkipped + flashFailed > 0}
+	{#if flashCommitTotal > 0}
 		<div class="flash ok" role="status">
-			{flashGifts > 0
-				? `${flashGifts} gift${flashGifts === 1 ? '' : 's'} created · `
-				: ''}{flashSkipped > 0 ? `${flashSkipped} skipped · ` : ''}{flashFailed > 0
-				? `${flashFailed} failed`
-				: ''}
+			{#if flashCreated > 0}<strong>{flashCreated}</strong> created · {/if}
+			{#if flashLinked > 0}<strong>{flashLinked}</strong> linked to existing · {/if}
+			{#if flashAdvanced > 0}<strong>{flashAdvanced}</strong> advanced ·
+			{/if}
+			{#if flashSkipped > 0}{flashSkipped} skipped · {/if}
+			{#if flashFailed > 0}<span class="err">{flashFailed} failed</span>{/if}
 			{#if flashMoveFails > 0}
 				<br />{flashMoveFails} Gmail label moves failed (check logs).
 			{/if}
@@ -143,32 +163,52 @@
 		</div>
 	{/if}
 
+	{#if flashAbstained > 0}
+		<div class="flash warn" role="status">
+			<strong>{flashAbstained} row{flashAbstained === 1 ? '' : 's'} held for review.</strong>
+			The shipment record was created but no sibling gift advanced status —
+			the matcher couldn't confidently decide which items shipped. See the
+			<strong>Held for review</strong> section below to pick which gifts
+			shipped and advance them in one click.
+		</div>
+	{/if}
+
+	{#if flashResolvedHeld !== null}
+		<div class="flash ok" role="status">
+			Held row resolved — advanced {flashResolvedHeld} gift{flashResolvedHeld === '1'
+				? ''
+				: 's'} to their shipment status.
+		</div>
+	{/if}
+
 	{#if form?.error}
 		<div class="flash err" role="alert">{form.error}</div>
 	{/if}
 
-	<!-- td-1d01e9 Phase B: LLM re-evaluation flash + admin trigger -->
+	<!-- Wave 1: LLM re-run flash. New shape (succeeded vs failed) tracks the
+	     re-run-import-rows action rather than the prior weak-match-confirm. -->
 	{#if flashLlmSkipped}
 		<div class="flash err" role="alert">
-			AI re-evaluation skipped: <code>ANTHROPIC_API_KEY</code> is not set on the server.
+			AI matcher skipped: <code>ANTHROPIC_API_KEY</code> is not set on the server.
 			Add it to <code>.env</code> and restart, or stick with heuristic matching only.
 		</div>
 	{:else if flashLlmEval > 0}
 		<div class="flash ok" role="status">
-			AI re-evaluated {flashLlmEval} weak match{flashLlmEval === 1 ? '' : 'es'} —
-			<strong>{flashLlmConfirmed} confirmed</strong>, {flashLlmRejected} rejected
-			({flashLlmCalls} API call{flashLlmCalls === 1 ? '' : 's'}{flashLlmErrors > 0
-				? `, ${flashLlmErrors} errors`
-				: ''}).
+			AI matcher re-ran on {flashLlmEval} pending row{flashLlmEval === 1 ? '' : 's'} —
+			<strong>{flashLlmSucceeded} verdicts refreshed</strong>{flashLlmFailed > 0
+				? `, ${flashLlmFailed} failed`
+				: ''}.
 		</div>
 	{/if}
 
 	{#if pending.length > 0}
 		<form method="POST" action="?/reevaluateMatches" class="llm-tools">
 			<input type="hidden" name="run_id" value={data.run.id} />
-			<button type="submit" class="ghost">Re-evaluate weak matches with AI</button>
+			<button type="submit" class="ghost">Re-run AI matcher for this run</button>
 			<span class="muted-inline">
-				Asks Haiku to confirm or reject weak gift-match suggestions. ~$0.001/row, cached.
+				Re-runs Opus against the current open-gifts list — picks up any gifts you've
+				added or edited since the scan. Cached per-context, so unchanged rows return
+				instantly.
 			</span>
 		</form>
 	{/if}
@@ -191,10 +231,18 @@
 			<ul class="rows">
 				{#each pending as r (r.id)}
 					{@const candidates = parseCandidates(r.match_candidates_json)}
-					{@const giftMatch = data.giftMatches[r.id]}
-					{@const giftCandidates = giftMatch?.candidates ?? []}
+					{@const llmVerdict = data.llmVerdicts[r.id]}
+					{@const giftCandidates = data.giftCandidates[r.id] ?? []}
 					{@const items = data.rowItems[r.id] ?? []}
 					{@const isMultiItem = items.length > 1}
+					{@const singleItemMatch =
+						!isMultiItem ? llmVerdict?.matches.find((m) => m.itemIndex === 0) ?? null : null}
+					{@const sibs = data.existingSiblings[r.id]}
+					{@const expectedItemCount = isMultiItem ? items.length : 1}
+					{@const willAdvance = (sibs?.count ?? 0) > 0}
+					{@const acceptLabel = willAdvance
+						? `Accept → advance ${sibs.count} existing gift${sibs.count === 1 ? '' : 's'}`
+						: `Accept → create ${expectedItemCount} new gift${expectedItemCount === 1 ? '' : 's'}`}
 					<li class="row-card">
 						<input type="hidden" name="row_id" value={r.id} />
 
@@ -263,7 +311,9 @@
 								</label>
 								<ul class="line-list">
 									{#each items as it, idx (idx)}
-										{@const lineMatch = data.lineItemMatches[`${r.id}:${idx}`]}
+										{@const lineCands = data.lineItemCandidates[`${r.id}:${idx}`] ?? []}
+										{@const lineLlmMatch =
+											llmVerdict?.matches.find((m) => m.itemIndex === idx) ?? null}
 										<li class="line-li">
 											<div class="line-head">
 												<p class="line-title">{it.title}</p>
@@ -278,38 +328,49 @@
 													placeholder="— choose —"
 												/>
 											</label>
-											{#if lineMatch && lineMatch.candidates.length > 0}
+											{#if lineCands.length > 0}
 												<fieldset class="line-gift">
 													<legend>
 														Existing
-														{lineMatch.candidates.length === 1 ? 'gift idea' : 'gift ideas'}
-														{#if lineMatch.confidence === 'strong'}
-															<span class="badge strong">strong match</span>
+														{lineCands.length === 1 ? 'gift idea' : 'gift ideas'}
+														{#if lineLlmMatch?.giftId && lineLlmMatch.confidence === 'high'}
+															<span class="badge ai-confirmed">AI: high confidence match</span>
+														{:else if lineLlmMatch?.giftId && lineLlmMatch.confidence === 'medium'}
+															<span class="badge ai-pill">AI: medium match</span>
+														{:else if lineLlmMatch?.giftId && lineLlmMatch.confidence === 'low'}
+															<span class="badge weak">AI: low match — verify</span>
+														{:else if lineLlmMatch && lineLlmMatch.giftId === null}
+															<span class="badge ai-rejected">AI: no match — create new</span>
 														{:else}
-															<span class="badge weak">weak match</span>
+															<span class="badge weak">heuristic suggestions</span>
 														{/if}
 													</legend>
+													{#if lineLlmMatch?.reason}
+														<p class="ai-reason"><em>AI:</em> {lineLlmMatch.reason}</p>
+													{/if}
 													<label class="gift-radio">
 														<input
 															type="radio"
 															name="linegift_{r.id}_{idx}"
 															value=""
-															checked={lineMatch.confidence !== 'strong'}
+															checked={!lineLlmMatch?.giftId}
 														/>
 														<span>Don't link — create a new gift</span>
 													</label>
-													{#each lineMatch.candidates as g (g.giftId)}
+													{#each lineCands as g (g.giftId)}
 														<label class="gift-radio">
 															<input
 																type="radio"
 																name="linegift_{r.id}_{idx}"
 																value={String(g.giftId)}
-																checked={lineMatch.topId === g.giftId}
+																checked={lineLlmMatch?.giftId === g.giftId}
 															/>
 															<span>
 																<strong>{g.title}</strong>
 																<span class="muted">→ {g.personDisplayName}</span>
-																<span class="score">{Math.round(g.score * 100)}%</span>
+																{#if lineLlmMatch?.giftId === g.giftId}
+																	<span class="badge ai-pill">AI pick</span>
+																{/if}
 															</span>
 														</label>
 													{/each}
@@ -331,7 +392,7 @@
 										r.email_type === 'shipped' ||
 										r.email_type === 'delivered'}
 								/>
-								<span>Accept → create / advance gift</span>
+								<span>{acceptLabel}</span>
 							</label>
 							<label class="radio">
 								<input
@@ -352,33 +413,29 @@
 							{#if giftCandidates.length > 0 && !isMultiItem}
 								<fieldset class="gift-link">
 									<legend>
-										Looks like an existing
-										{giftCandidates.length === 1 ? 'gift' : 'gift idea'}
-										{#if giftMatch?.confidence === 'strong'}
-											<span class="badge strong">strong match</span>
-										{:else if giftMatch?.llmVerdict?.confirmedGiftId}
-											<!-- td-1d01e9 Phase B: AI confirmed one weak candidate -->
-											<span class="badge ai-confirmed">AI confirmed</span>
-										{:else if giftMatch?.llmVerdict && giftMatch.llmVerdict.confirmedGiftId === null}
-											<!-- td-1d01e9 Phase B: AI rejected all weak candidates -->
-											<span class="badge ai-rejected">AI rejected</span>
+										Existing
+										{giftCandidates.length === 1 ? 'gift idea' : 'gift ideas'}
+										{#if singleItemMatch?.giftId && singleItemMatch.confidence === 'high'}
+											<span class="badge ai-confirmed">AI: high confidence match</span>
+										{:else if singleItemMatch?.giftId && singleItemMatch.confidence === 'medium'}
+											<span class="badge ai-pill">AI: medium match</span>
+										{:else if singleItemMatch?.giftId && singleItemMatch.confidence === 'low'}
+											<span class="badge weak">AI: low match — verify</span>
+										{:else if singleItemMatch && singleItemMatch.giftId === null}
+											<span class="badge ai-rejected">AI: no match — create new</span>
 										{:else}
-											<span class="badge weak">weak match</span>
+											<span class="badge weak">heuristic suggestions</span>
 										{/if}
 									</legend>
-									{#if giftMatch?.llmVerdict}
-										<p class="ai-reason">
-											<em>AI:</em>
-											{giftMatch.llmVerdict.reason}
-										</p>
+									{#if singleItemMatch?.reason}
+										<p class="ai-reason"><em>AI:</em> {singleItemMatch.reason}</p>
 									{/if}
 									<label class="gift-radio">
 										<input
 											type="radio"
 											name="gift_{r.id}"
 											value=""
-											checked={giftMatch?.confidence !== 'strong' &&
-												!giftMatch?.llmVerdict?.confirmedGiftId}
+											checked={!singleItemMatch?.giftId}
 										/>
 										<span>Don't link — create a new gift</span>
 									</label>
@@ -388,14 +445,12 @@
 												type="radio"
 												name="gift_{r.id}"
 												value={String(g.giftId)}
-												checked={giftMatch?.topId === g.giftId ||
-													giftMatch?.llmVerdict?.confirmedGiftId === g.giftId}
+												checked={singleItemMatch?.giftId === g.giftId}
 											/>
 											<span>
 												<strong>{g.title}</strong>
 												<span class="muted">→ {g.personDisplayName}</span>
-												<span class="score">{Math.round(g.score * 100)}%</span>
-												{#if giftMatch?.llmVerdict?.confirmedGiftId === g.giftId}
+												{#if singleItemMatch?.giftId === g.giftId}
 													<span class="badge ai-pill">AI pick</span>
 												{/if}
 											</span>
@@ -467,6 +522,77 @@
 				{/if}
 			</div>
 		</form>
+	{/if}
+
+	{#if heldRows.length > 0}
+		<section class="card held-card">
+			<p class="eyebrow held-eyebrow">
+				Held for review ({heldRows.length}) — shipment recorded, status not advanced
+			</p>
+			<p class="held-intro">
+				The matcher couldn't confidently decide which gifts shipped in these
+				notifications. The shipment + tracking were saved, but no gift's status
+				moved. Tick the gifts that actually shipped and advance them, or advance
+				none if this notification doesn't apply.
+			</p>
+			<ul class="held-list">
+				{#each heldRows as r (r.id)}
+					{@const sibs = data.heldSiblings[r.id] ?? []}
+					{@const target = data.heldTargets[r.id] ?? 'shipped'}
+					<li class="held-row-card">
+						<div class="held-row-head">
+							<p class="held-subject">{r.subject ?? '(no subject)'}</p>
+							<p class="held-meta">
+								{r.email_type}
+								{#if r.parsed_order_id}· order <span class="mono">{r.parsed_order_id}</span>{/if}
+								{#if r.parsed_tracking_number}· {r.parsed_carrier ?? ''} {r.parsed_tracking_number}{/if}
+							</p>
+							{#if r.error_message}
+								<p class="held-why"><em>Why held:</em> {r.error_message}</p>
+							{/if}
+						</div>
+
+						{#if sibs.length > 0}
+							<form method="POST" action="?/resolveHeld" class="held-resolve">
+								<input type="hidden" name="run_id" value={data.run.id} />
+								<input type="hidden" name="row_id" value={r.id} />
+								<fieldset class="held-siblings">
+									<legend>Which gifts shipped? Advance to <strong>{target}</strong>:</legend>
+									{#each sibs as s (s.giftId)}
+										<label class="held-sibling {s.canAdvance ? '' : 'disabled'}">
+											<input
+												type="checkbox"
+												name="advance_gift_id"
+												value={s.giftId}
+												disabled={!s.canAdvance}
+											/>
+											<span class="held-sibling-title">
+												<a href="/app/gifts/{s.giftId}">{s.title}</a>
+											</span>
+											<span class="held-sibling-meta">
+												→ {s.personName}
+												<span class="held-status">({s.status}{s.canAdvance ? '' : ` — can't → ${target}`})</span>
+											</span>
+										</label>
+									{/each}
+								</fieldset>
+								<div class="held-actions">
+									<button type="submit" class="primary">Advance selected → {target}</button>
+									<button type="submit" class="ghost" title="Mark resolved without advancing any gift">
+										None of these — just dismiss
+									</button>
+								</div>
+							</form>
+						{:else}
+							<p class="held-empty muted">
+								No sibling gifts found under this order. Open the order's gifts
+								directly to advance them.
+							</p>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</section>
 	{/if}
 
 	{#if handled.length > 0}
@@ -594,6 +720,8 @@
 	}
 	.flash.ok { background: var(--green-soft); color: var(--green); border: 1px solid var(--green); }
 	.flash.err { background: #fde9e6; color: var(--rose); border: 1px solid var(--rose); }
+	.flash.warn { background: var(--amber-soft); color: var(--amber); border: 1px solid var(--amber); }
+	.flash .err { color: var(--rose); font-weight: 600; }
 
 	.card {
 		background: var(--paper);
@@ -883,14 +1011,23 @@
 		margin-left: 6px;
 		text-transform: uppercase;
 	}
-	.line-gift .badge.strong {
-		background: var(--green);
-		color: var(--paper);
-	}
 	.line-gift .badge.weak {
 		background: var(--amber-soft);
 		color: var(--amber);
 		border: 1px solid var(--amber);
+	}
+	.line-gift .badge.ai-confirmed {
+		background: var(--green);
+		color: var(--paper);
+	}
+	.line-gift .badge.ai-rejected {
+		background: var(--bg);
+		color: var(--muted);
+		border: 1px solid var(--line);
+	}
+	.line-gift .badge.ai-pill {
+		background: var(--green-soft);
+		color: var(--green);
 	}
 
 	.gift-link legend {
@@ -912,10 +1049,6 @@
 		letter-spacing: 0.04em;
 		margin-left: 6px;
 		text-transform: uppercase;
-	}
-	.gift-link .badge.strong {
-		background: var(--green);
-		color: var(--paper);
 	}
 	.gift-link .badge.weak {
 		background: var(--amber-soft);
@@ -986,13 +1119,6 @@
 		color: var(--muted);
 		font-size: 13px;
 		margin-left: 6px;
-	}
-
-	.gift-radio .score {
-		margin-left: auto;
-		font-size: 12px;
-		color: var(--muted);
-		font-variant-numeric: tabular-nums;
 	}
 
 	.gift-link .hint {
@@ -1097,6 +1223,95 @@
 
 	.err-line { color: var(--rose); }
 	.more { font-style: italic; }
+
+	/* Wave 1 (Codex round 4 P2): held-for-review resolve panel. */
+	.held-card {
+		background: var(--amber-soft);
+		border: 1px solid var(--amber);
+	}
+	.held-eyebrow { color: var(--amber); }
+	.held-intro {
+		font-family: var(--font-sans);
+		font-size: 14px;
+		color: var(--ink);
+		margin: 6px 0 14px;
+	}
+	.held-list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+	.held-row-card {
+		background: var(--paper);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		padding: 14px 16px;
+	}
+	.held-subject {
+		font-family: var(--font-serif);
+		font-size: 16px;
+		color: var(--ink);
+	}
+	.held-meta {
+		font-family: var(--font-sans);
+		font-size: 12px;
+		color: var(--muted);
+		margin-top: 2px;
+	}
+	.held-why {
+		font-family: var(--font-sans);
+		font-size: 13px;
+		color: var(--amber);
+		margin-top: 6px;
+	}
+	.held-siblings {
+		border: none;
+		padding: 0;
+		margin: 12px 0 0;
+	}
+	.held-siblings legend {
+		font-family: var(--font-sans);
+		font-size: 13px;
+		color: var(--ink);
+		margin-bottom: 6px;
+	}
+	.held-sibling {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+		padding: 6px 0;
+		font-family: var(--font-sans);
+		font-size: 14px;
+	}
+	.held-sibling.disabled {
+		opacity: 0.55;
+	}
+	.held-sibling input[type='checkbox'] {
+		width: 20px;
+		height: 20px;
+		flex-shrink: 0;
+	}
+	.held-sibling-meta {
+		color: var(--muted);
+		font-size: 13px;
+	}
+	.held-status {
+		font-style: italic;
+	}
+	.held-actions {
+		display: flex;
+		gap: 10px;
+		margin-top: 12px;
+		flex-wrap: wrap;
+	}
+	.held-empty {
+		margin-top: 10px;
+		font-family: var(--font-sans);
+		font-size: 13px;
+	}
 
 	.handled-li {
 		display: flex;

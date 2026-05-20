@@ -14,7 +14,7 @@ Live at **<https://gifts.gaylon.photos>**.
 - **argon2id** password hashing, server-side sessions, `SameSite=Lax` cookies
 - **Google OAuth2** (Gmail + People API) for Contacts import and email-driven gift / package import
 - **Shippo** tracking API for carrier registration + webhook checkpoints (URL-token auth, pay-as-you-go ~$0.01/registration)
-- **Anthropic Haiku 4.5** (optional, via `ANTHROPIC_API_KEY`) for semantic confirmation of weak gift-match suggestions on the Amazon-review screen; cached per (item, candidate-set) so re-runs are free
+- **Anthropic Opus 4.7** (optional, via `ANTHROPIC_API_KEY`) as the primary Amazon-import matcher. Heuristic ranks open gifts into a top-20 shortlist; Opus picks the right candidate per line item via structured `tool_use` output (`{matches[], unmatched_items[], confidence, safe_to_apply, summary}`). Verdicts persist on the import row and the review page renders synchronously. Shipment matching uses the same model with an abstain policy — when uncertain about which siblings shipped, the shipment record is still created but no gift advances status; admin gets a "held for review" surface in the UI
 - **node-cron** in-process scheduler (env-guarded; only runs when `NODE_ENV=production AND ENABLE_CRON=true`)
 - **PM2** for process management on a shared DigitalOcean droplet behind Nginx + Cloudflare (Flexible SSL)
 - **Telegram + nodemailer** for daily digest delivery
@@ -32,7 +32,7 @@ Accessibility is a core constraint, not a polish item — Lighthouse 100/100/100
 - **Two email-import pipelines** (admin gates every commit):
   - **Amazon**: `Giftlist/Amazon/Inbox` → parses Amazon order/shipped/delivered emails → recipient match → gift create/advance. Multi-recipient orders model partial shipments via `order_shipments` so only the boxed-up siblings advance status per shipping notification.
   - **Tracking**: `Giftlist/Tracking/Inbox` → parses non-Amazon shipment confirmations (UPS / USPS / FedEx / DHL / OnTrac / Lasership / Canada Post) → either links to existing gift, routes ambiguous order# matches to a manual review queue, or creates a self-package with Shippo registration
-- **Match-quality safety net** — lexical matcher (stopwords + anchor-token gate) plus an optional LLM second-pass for weak candidates; admin sees an "AI confirmed / AI rejected" badge inline
+- **Match-quality safety net** — heuristic shortlist + Opus 4.7 ranker with confidence-tiered verdicts (`high` / `medium` / `low`); admin sees AI badges + the model's reasoning inline. Shipment-decider abstains rather than guess on ambiguous shipped/delivered events. Commit-time dedup uses content fingerprints (title-only) with line_item_index as fallback, refuses to silently override a recipient mismatch, and is backed by a partial unique index on active `(order_pk, line_item_index)`
 - **Searchable recipient picker** — type-to-filter combobox on every "for who?" field (gift forms + Amazon review per-line-item pickers)
 - Personal (non-gift) packages — `is_self` people scoped per-owner so manager and admin only see their own
 - Soft-delete with reachable Restore button + visible archived gifts under "Past gifts" history per person, plus `/admin/system/archived` for cross-person browsing with chronological sort
@@ -98,14 +98,15 @@ CCC pre-flight runs this before uploading the directory to the NAS.
 
 | Concern | File |
 |---|---|
-| Schema | `migrations/*.sql` (currently at v22) |
+| Schema | `migrations/*.sql` (currently at **v26**) |
 | Migration runner (FK choreography) | `src/lib/server/migrate.ts` |
 | Type definitions | `src/lib/server/types.ts` |
 | Auth | `src/lib/server/{auth,session}.ts` |
 | Job orchestration | `src/lib/server/jobs/{runner,reminders,amazon-import,tracking-import,tracking-refresh,christmas-kickoff,backup}.ts` |
 | Email parsers | `src/lib/server/{amazon-parser,shipment-parser}.ts` |
-| Gift / line-item matcher | `src/lib/server/{gift-matcher,matcher-llm}.ts` (Phase A heuristic + cached Haiku second-pass) |
+| Gift / line-item matcher (Wave 1) | `src/lib/server/{gift-matcher,llm-matcher,shipment-decider}.ts` (heuristic shortlist ranker + Opus 4.7 verdict + shipment abstain policy) |
 | Order / shipment helpers | `src/lib/server/orders.ts` (`upsertOrderByOrderId`, `upsertShipment`, `matchSiblingsToShipment`) |
+| DB test harness (Wave 1) | `src/lib/server/test-harness.ts` (tempfile SQLite + factories used by fixture corpus in `src/lib/server/jobs/amazon-import-fixtures.test.ts`) |
 | Tracking provider integration | `src/lib/server/tracking.ts` (+ webhook at `/api/tracking/shippo`) |
 | Gmail reader | `src/lib/server/gmail-reader.ts` |
 | Notification channels | `src/lib/server/{notify,notify-email,notify-telegram}.ts` |

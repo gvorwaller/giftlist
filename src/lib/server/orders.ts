@@ -1,6 +1,13 @@
 import { getDb } from './db';
-import { scoreGiftCandidates, type ScoringCandidate } from './gift-matcher';
+import { scoreOverlap } from './gift-matcher';
 import type { Gift, Order, OrderShipment } from './types';
+
+/** Minimum token-overlap score for a heuristic shipment-to-sibling
+ * match. Below this, the heuristic doesn't claim a match — caller
+ * consults the LLM (Phase 2) or routes the row to review. 0.3 mirrors
+ * the prior Phase-A weak-match floor; the safety story comes from the
+ * abstain path in `applyLifecycleEvent`, not from a high threshold. */
+const SHIPMENT_OVERLAP_THRESHOLD = 0.3;
 
 /**
  * td-3e9ae2: order CRUD helpers.
@@ -257,28 +264,50 @@ export function upsertShipment(input: ShipmentUpsertInput): number {
  * present but none match — caller may decide to fall back to "advance all"
  * with a log.
  */
+/**
+ * Heuristic-only sibling-to-shipment matcher. Pairs each shipped item
+ * title against the order's siblings using token overlap; siblings
+ * scoring at or above `SHIPMENT_OVERLAP_THRESHOLD` are considered
+ * matched.
+ *
+ * Wave 1: when `shippedItemTitles` is empty (legacy / single-item
+ * shipping notification) the caller previously fell back to "advance
+ * ALL siblings". That fallback is removed at the call site — instead
+ * the caller queries the LLM via `llmMatchShipment` and respects its
+ * `safe_to_apply` verdict. This function now ONLY reports what the
+ * heuristic can determine; it never speaks for the LLM.
+ *
+ * Returns:
+ *   - matched: siblings the heuristic confidently pairs with at least
+ *     one shipment item title.
+ *   - itemsHadTitles: false when the shipment email enumerated no
+ *     items (caller must use LLM or abstain).
+ *   - heuristicCertain: true when items WERE enumerated AND every item
+ *     paired with a sibling at >= threshold. Callers can skip the LLM
+ *     when this is true.
+ */
 export function matchSiblingsToShipment(
 	siblings: Gift[],
 	shippedItemTitles: string[]
-): { matched: Gift[]; itemsHadTitles: boolean } {
+): { matched: Gift[]; itemsHadTitles: boolean; heuristicCertain: boolean } {
 	if (shippedItemTitles.length === 0) {
-		return { matched: siblings, itemsHadTitles: false };
+		return { matched: [], itemsHadTitles: false, heuristicCertain: false };
 	}
-	const candidates: ScoringCandidate[] = siblings.map((s) => ({
-		id: s.id,
-		title: s.title,
-		person_id: s.person_id,
-		display_name: ''
-	}));
 	const matchedIds = new Set<number>();
+	let everyItemMatched = true;
 	for (const itemTitle of shippedItemTitles) {
-		const result = scoreGiftCandidates(itemTitle, candidates);
-		for (const c of result.candidates) {
-			matchedIds.add(c.giftId);
+		let itemMatched = false;
+		for (const s of siblings) {
+			if (scoreOverlap(s.title, itemTitle) >= SHIPMENT_OVERLAP_THRESHOLD) {
+				matchedIds.add(s.id);
+				itemMatched = true;
+			}
 		}
+		if (!itemMatched) everyItemMatched = false;
 	}
 	return {
 		matched: siblings.filter((s) => matchedIds.has(s.id)),
-		itemsHadTitles: true
+		itemsHadTitles: true,
+		heuristicCertain: everyItemMatched && matchedIds.size > 0
 	};
 }

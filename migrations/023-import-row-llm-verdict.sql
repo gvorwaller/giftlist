@@ -1,0 +1,21 @@
+-- Wave 1 Phase 1: persist the LLM matcher's structured verdict on the
+-- import row so the review page renders synchronously without re-calling
+-- the API or doing a separate cache lookup.
+--
+-- llm_verdict_json holds the full LlmMatchVerdict shape:
+--   {
+--     matches: [{ itemIndex, giftId | null, confidence, reason }],
+--     unmatched_items: number[],
+--     safe_to_apply: boolean,
+--     confidence: 'high' | 'medium' | 'low' | 'abstain',
+--     summary: string,
+--     model: string,
+--     prompt_version: string,
+--     created_at: ISO8601
+--   }
+--
+-- NULL until the LLM has been called for this row. Cleared (set NULL)
+-- when admin clicks "Re-run AI matcher for this run" so the next render
+-- re-evaluates with fresh state.
+
+ALTER TABLE import_rows ADD COLUMN llm_verdict_json TEXT;

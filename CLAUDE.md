@@ -18,7 +18,7 @@ Mobile-first gift tracking web app with two roles: a gift manager (primary user)
 
 **Accessibility is a core design constraint, not a nice-to-have.** See design spec Section 11 for detailed guidelines.
 
-The original 6-phase plan in `docs/gift-tracker-implementation-plan-Codex.md` is largely shipped (phases 1-6 complete; ongoing work tracked in `td` and `docs/devlog/YYYY-MM-DD.md`). Schema currently at v22.
+The original 6-phase plan in `docs/gift-tracker-implementation-plan-Codex.md` is largely shipped (phases 1-6 complete; ongoing work tracked in `td` and `docs/devlog/YYYY-MM-DD.md`). Schema currently at **v26**.
 
 ## Commands
 
@@ -70,17 +70,17 @@ cc-status --lines 20                         # last 20 entries
 ### Data Layer
 SQLite (WAL, single-writer). Migrations live in `migrations/NNN-name.sql` and run at boot via `src/lib/server/migrate.ts`. The runner toggles `PRAGMA foreign_keys = OFF` before each migration's transaction and runs `PRAGMA foreign_key_check` after commit, so migrations needing the SQLite recreate-table pattern (e.g. 014, 015) are safe.
 
-Current schema (v22) — tables grouped by domain:
+Current schema (v26) — tables grouped by domain:
 
 - **Identity**: `users`, `sessions`, `external_tokens` (encrypted Google OAuth)
 - **Recipients**: `people` (with `is_self` + `owner_user_id` for per-user privacy on personal packages), `person_aliases`
 - **Occasions**: `occasions`, `person_occasions`, `occasion_skips` (per-iteration skips, td-927a2d)
-- **Gifts**: `gifts` (full lifecycle, `archived_at` td-dc1846, `shipment_id` td-d08902), `vendors`, `shippers` (USPS / UPS / FedEx / Other / DHL / OnTrac / Lasership), `shipment_events`
+- **Gifts**: `gifts` (full lifecycle, `archived_at` td-dc1846, `shipment_id` td-d08902, **partial unique index `gifts_order_lineitem_active` on active `(order_pk, line_item_index)` from Wave 1 migration 025**), `vendors`, `shippers` (USPS / UPS / FedEx / Other / DHL / OnTrac / Lasership), `shipment_events`
 - **Orders**: `orders` (1:N over `gifts`, td-3e9ae2), `order_shipments` (N:1 under `orders` for partial shipments, td-d08902)
 - **Drafts / history**: `drafts`, `recently_viewed`
-- **Imports**: `import_runs` (`source` ∈ {`amazon_email`, `tracking_email`}), `import_rows` (`email_type` includes `tracking_only`, `order_confirmation`; `disposition` includes `review` td-3d1ee6)
-- **Matcher**: `matcher_llm_cache` (Haiku verdicts on weak gift-matches, td-1d01e9)
-- **Ops**: `audit_log`, `job_runs`, `app_state`
+- **Imports**: `import_runs` (`source` ∈ {`amazon_email`, `tracking_email`}), `import_rows` (`email_type` includes `tracking_only`, `order_confirmation`; `disposition` includes `review` td-3d1ee6; **Wave 1: `llm_verdict_json` column (mig 023) + `parsed_body_excerpt` column (mig 026)**)
+- **Matcher**: **`matcher_llm_cache` rebuilt by mig 024** — versioned key `sha1(mode + model + prompt_version + …)` + `expires_at` TTL (7 days). Holds Opus 4.7 verdicts under `mode IN ('import', 'shipment')`.
+- **Ops**: `audit_log`, `job_runs`, `app_state` (Wave 1 stores `wave1_migration_025_archived_gifts` forensic JSON when mig 025 auto-archives prod duplicate clusters)
 
 ### Route Structure
 ```
@@ -121,6 +121,8 @@ Route policy: manager cannot reach `/admin/*` (enforced by `src/routes/admin/+la
 - **Audit logging**: every create, update, archive, status transition, scan, and import-commit writes a human-readable record. `entityType: 'import'` rows link source-aware to `/admin/imports/{amazon,tracking}/review`.
 - **Soft deletes only**: no permanent deletes in the manager view; archive toggles `is_archived`. Past-gifts section on `/app/people/[id]` surfaces archived rows so admin can navigate in and Restore via the gift detail page.
 - **Shippo registration mutex**: `tracking.ts` keeps a per-process `Map<giftId, Promise>` so concurrent calls (admin double-click, importer racing manual refresh) share one POST instead of double-billing $0.01.
+- **Amazon LLM matcher (Wave 1)**: `gift-matcher.ts` ranks open gifts into a top-20 shortlist (recipient-hint priority); `llm-matcher.ts` calls Opus 4.7 via tool_use to produce a structured `LlmMatchVerdict` `{matches[], unmatched_items[], confidence, safe_to_apply, summary}`; verdicts persist on `import_rows.llm_verdict_json` so the review page renders synchronously. `shipment-decider.ts` owns the safety policy: heuristic-certain → advance matched siblings; LLM-uncertain or items absent → abstain (create the shipment row, hold sibling status, surface in admin UI). Cache key is versioned with mode/model/prompt_version/candidate-ids/person-ids/items-fingerprint/recipient-hint/body-hash so different contexts can't replay each other's verdicts.
+- **Amazon commit dedup (Wave 1 Phase 3)**: `commitMultiItemAccept` matches by content fingerprint (title-only) first, line_item_index second (fallback only when fingerprints don't match). Recipient mismatch on a matched sibling FAILS the row with an explicit error instead of silently overriding. DB partial unique index on active `(order_pk, line_item_index)` is the belt-and-suspenders.
 
 ## CSS Rules
 
@@ -163,6 +165,10 @@ OAuth (Google) — set up via `/admin/settings`:
 Tracking (Shippo):
 - `SHIPPO_API_KEY` — live or test key
 - `SHIPPO_WEBHOOK_SECRET` — URL-token validated against `?token=` on the webhook route
+
+LLM matcher (Wave 1) — optional but recommended:
+- `ANTHROPIC_API_KEY` — Opus 4.7 verdict generation. When unset the matcher degrades silently to heuristic-only ranking on the review page (no badges, no auto-shipment-decisions).
+- `ANTHROPIC_MATCHER_MODEL` — override the default model. Defaults to `claude-opus-4-7`.
 
 Notifications:
 - SMTP credentials (host, port, user, pass) or Resend API key

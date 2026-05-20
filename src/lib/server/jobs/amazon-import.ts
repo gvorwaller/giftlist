@@ -6,7 +6,7 @@ import {
 	listLabelMessages,
 	trashMessagesUnderLabel
 } from '../gmail-reader';
-import { parseAmazonEmail } from '../amazon-parser';
+import { parseAmazonEmail, type ParsedAmazonEmail } from '../amazon-parser';
 import { matchRecipient, saveAlias } from '../name-matcher';
 import { logAudit } from '../audit';
 import { isPersonVisibleToUser } from '../people';
@@ -20,6 +20,9 @@ import {
 	upsertOrderByOrderId,
 	upsertShipment
 } from '../orders';
+import { rankCandidatesForImport, rankCandidatesForItems } from '../gift-matcher';
+import { llmMatchImportRow } from '../llm-matcher';
+import { planShipmentAdvanceForRow, type ShipmentAdvancePlan } from '../shipment-decider';
 import type { ParsedAmazonItem } from '../amazon-parser';
 import type {
 	EmailType,
@@ -112,9 +115,10 @@ export async function runAmazonScan(
 				   from_address, email_type, parsed_title, parsed_order_id, parsed_price_cents,
 				   parsed_tracking_number, parsed_carrier, parsed_recipient_name,
 				   parsed_shipping_address, parsed_gift_message, parsed_amazon_tracking_url,
-				   parsed_items_json,
-				   match_person_id, match_confidence, match_candidates_json, disposition
-				 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				   parsed_items_json, parsed_body_excerpt,
+				   match_person_id, match_confidence, match_candidates_json, disposition,
+				   llm_verdict_json
+				 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			);
 
 			let summaries;
@@ -150,34 +154,81 @@ export async function runAmazonScan(
 			// units; Gmail allows 250 units/sec/user, so concurrency 10 = 50
 			// units/sec sustained — comfortably below the throttle. Serial
 			// fetches froze the admin round-trip on the first 200-msg attempt.
+			//
+			// Wave 1: after parsing each batch, we dispatch LLM matcher calls
+			// in parallel for the pending rows and await all before serial
+			// insert. Sequential DB writes (better-sqlite3 is single-writer)
+			// happen with the verdicts already in hand, so the only added
+			// wall-clock per batch is `max(Gmail-fetch-time, LLM-call-time)`
+			// instead of summing them.
 			const FETCH_CONCURRENCY = 10;
+			let llmCalls = 0;
+			let llmErrors = 0;
 			for (let offset = 0; offset < fresh.length; offset += FETCH_CONCURRENCY) {
 				const batch = fresh.slice(offset, offset + FETCH_CONCURRENCY);
-				const results = await Promise.allSettled(
+				const fetchResults = await Promise.allSettled(
 					batch.map((s) => getFullMessage(userId, s.id))
 				);
-				for (let i = 0; i < batch.length; i++) {
-					const s = batch[i];
-					const res = results[i];
+
+				// Phase 1: parse each successful fetch + compute the recipient
+				// match. All sync work — no DB writes yet.
+				type StagedParse = {
+					summary: (typeof batch)[number];
+					parse: ParsedAmazonEmail;
+					bodyExcerpt: string | null;
+					recipientHit: ReturnType<typeof matchRecipient>;
+					disposition: ImportRowDisposition;
+				};
+				const staged: Array<StagedParse | null> = batch.map((s, i) => {
+					const res = fetchResults[i];
 					if (res.status !== 'fulfilled') {
 						console.warn(`[amazon-import] failed to fetch ${s.id}:`, res.reason);
-						continue;
+						return null;
 					}
 					const parse = parseAmazonEmail(res.value);
 					parsed += 1;
-
+					// Wave 1 follow-up: persist a body excerpt (≤4000 chars) so the
+					// LLM matcher has fallback context when the structured items[]
+					// extractor missed everything. Only useful for pending dispositions
+					// — auto-skipped marketing rows never call the LLM.
+					const bodyExcerpt =
+						parse.items.length === 0 && res.value.bodyText
+							? res.value.bodyText.slice(0, 4000)
+							: null;
 					const recipientMatch = matchRecipient(parse.recipientName);
 					const match = recipientMatch.personId
 						? recipientMatch
 						: applyOrderIdFallback(recipientMatch, parse.orderId);
-					const candidatesJson = JSON.stringify(match.candidates);
 					const disposition = defaultDisposition(parse.emailType);
+					return { summary: s, parse, bodyExcerpt, recipientHit: match, disposition };
+				});
 
-					// td-3e9ae2: persist the full per-line-item breakdown so the
-					// review UI can render N recipient pickers without re-parsing.
-					// Null when there are no items (marketing/review-request emails)
-					// so legacy consumers fall back cleanly to parsed_title.
+				// Phase 2: LLM verdict per pending row, dispatched in parallel.
+				// Marketing/review_request and unknown-type rows skip the LLM —
+				// they auto-skip in commit anyway and don't need a verdict.
+				const verdictPromises: Array<Promise<string | null>> = staged.map((st) =>
+					st && st.disposition === 'pending'
+						? buildAndCallMatcher(st.parse, st.bodyExcerpt)
+						: Promise.resolve(null)
+				);
+				const verdictResults = await Promise.allSettled(verdictPromises);
+
+				// Phase 3: serial insert.
+				for (let i = 0; i < batch.length; i++) {
+					const st = staged[i];
+					if (!st) continue;
+					const { summary: s, parse, bodyExcerpt, recipientHit: match, disposition } = st;
+					const candidatesJson = JSON.stringify(match.candidates);
 					const itemsJson = parse.items.length > 0 ? JSON.stringify(parse.items) : null;
+					let llmVerdictJson: string | null = null;
+					const vr = verdictResults[i];
+					if (vr.status === 'fulfilled' && vr.value) {
+						llmVerdictJson = vr.value;
+						llmCalls += 1;
+					} else if (vr.status === 'rejected') {
+						llmErrors += 1;
+						console.warn('[amazon-import] llm matcher rejected:', vr.reason);
+					}
 					insertRowStmt.run(
 						run.id,
 						s.id,
@@ -196,15 +247,21 @@ export async function runAmazonScan(
 						parse.giftMessage,
 						parse.trackingUrl,
 						itemsJson,
+						bodyExcerpt,
 						match.personId,
 						match.confidence,
 						candidatesJson,
-						disposition
+						disposition,
+						llmVerdictJson
 					);
 					newRows += 1;
-
 					if (disposition !== 'pending') idsToMove.push(s.id);
 				}
+			}
+			if (llmErrors > 0) {
+				console.warn(
+					`[amazon-import] LLM matcher: ${llmCalls} ok, ${llmErrors} errors. Review page shows heuristic-only for affected rows.`
+				);
 			}
 
 			// Stragglers: summaries already in import_rows whose disposition is
@@ -314,6 +371,150 @@ function applyOrderIdFallback(
 	};
 }
 
+/**
+ * Wave 1: build the LLM matcher input from a parsed Amazon email and
+ * call the matcher. Returns the verdict as a JSON string (for direct
+ * insert into `import_rows.llm_verdict_json`) or null when no candidates
+ * exist, no API key is configured, or the call fails.
+ */
+async function buildAndCallMatcher(
+	parse: ParsedAmazonEmail,
+	bodyExcerpt: string | null = null
+): Promise<string | null> {
+	// Recipient hint: when the order_id maps to an existing gift, that
+	// gift's recipient is the strongest signal we have.
+	const orderHit = findGiftPersonByOrderId(parse.orderId);
+	const recipientHintPersonId = orderHit?.personId ?? null;
+
+	// Codex P2: multi-item emails carry N item titles in parse.items[].
+	// Use the multi-title ranker so candidates relevant to items 1..N
+	// also enter the shortlist (single-title ranking against parse.title
+	// = items[0] only would systematically hide them from the LLM).
+	const itemTitles =
+		parse.items.length > 0
+			? parse.items.map((i) => i.title).filter((t): t is string => !!t)
+			: parse.title
+				? [parse.title]
+				: [];
+	const candidates = rankCandidatesForItems(itemTitles, recipientHintPersonId, 20);
+	if (candidates.length === 0) return null;
+
+	const verdict = await llmMatchImportRow({
+		emailSubject: null, // not exposed in ParsedAmazonEmail; subject lives on the import row
+		emailType: parse.emailType,
+		orderId: parse.orderId,
+		parsedRecipientName: parse.recipientName,
+		recipientHintPersonId,
+		vendorLabel: 'Amazon',
+		items: parse.items.map((it, idx) => ({
+			itemIndex: idx,
+			title: it.title,
+			priceCents: it.priceCents,
+			quantity: it.quantity
+		})),
+		bodyFallback: bodyExcerpt,
+		candidates,
+		corrections: [] // Wave 2 feature
+	});
+	if (!verdict) return null;
+	return JSON.stringify(verdict);
+}
+
+/**
+ * Wave 1: rebuild the LLM matcher input from a persisted ImportRow and
+ * call the matcher. Mirrors `buildAndCallMatcher` for the scan path but
+ * sources its inputs from the row instead of a fresh Gmail parse, so
+ * the "Re-run AI matcher" admin button can refresh verdicts on rows
+ * that were staged before a key was configured (or before this Wave
+ * landed) without re-fetching Gmail.
+ */
+async function buildAndCallMatcherFromRow(row: ImportRow): Promise<string | null> {
+	const items = parseRowItems(row);
+	const orderHit = findGiftPersonByOrderId(row.parsed_order_id);
+	const recipientHintPersonId = orderHit?.personId ?? row.match_person_id ?? null;
+	const needle = row.parsed_title ?? '';
+	if (!needle && items.length === 0) return null;
+	// Codex P2: rank against every item title, not just parsed_title
+	// (which is items[0] only).
+	const itemTitles =
+		items.length > 0
+			? items.map((i) => i.title).filter((t): t is string => !!t)
+			: needle
+				? [needle]
+				: [];
+	const candidates = rankCandidatesForItems(itemTitles, recipientHintPersonId, 20);
+	if (candidates.length === 0) return null;
+
+	const verdict = await llmMatchImportRow({
+		emailSubject: row.subject,
+		emailType: row.email_type,
+		orderId: row.parsed_order_id,
+		parsedRecipientName: row.parsed_recipient_name,
+		recipientHintPersonId,
+		vendorLabel: 'Amazon',
+		items: items.map((it, idx) => ({
+			itemIndex: idx,
+			title: it.title,
+			priceCents: it.priceCents,
+			quantity: it.quantity
+		})),
+		bodyFallback: row.parsed_body_excerpt,
+		candidates,
+		corrections: []
+	});
+	if (!verdict) return null;
+	return JSON.stringify(verdict);
+}
+
+export interface ReevaluateRunResult {
+	evaluated: number;
+	succeeded: number;
+	failed: number;
+	skippedNoKey: boolean;
+}
+
+/**
+ * Wave 1: admin-triggered re-evaluation. Walks every pending row in
+ * the run, force-refreshes its LLM verdict against the CURRENT open-
+ * gifts pool (admin may have added/edited gifts since the scan), and
+ * updates `import_rows.llm_verdict_json` in place. The matcher's own
+ * cache layer absorbs identical re-calls — only changed candidate
+ * sets actually hit the API.
+ */
+export async function reevaluateImportRowsForRun(runId: number): Promise<ReevaluateRunResult> {
+	const out: ReevaluateRunResult = {
+		evaluated: 0,
+		succeeded: 0,
+		failed: 0,
+		skippedNoKey: false
+	};
+	if (!process.env.ANTHROPIC_API_KEY) {
+		out.skippedNoKey = true;
+		return out;
+	}
+	const db = getDb();
+	const rows = db
+		.prepare<[number], ImportRow>(
+			`SELECT * FROM import_rows WHERE import_run_id = ? AND disposition = 'pending'`
+		)
+		.all(runId);
+	const updateStmt = db.prepare(
+		`UPDATE import_rows SET llm_verdict_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+	);
+	for (const row of rows) {
+		out.evaluated += 1;
+		try {
+			const json = await buildAndCallMatcherFromRow(row);
+			updateStmt.run(json, row.id);
+			if (json) out.succeeded += 1;
+		} catch (err) {
+			out.failed += 1;
+			console.warn(`[amazon-import] reevaluate row ${row.id} failed:`, err);
+		}
+	}
+	return out;
+}
+
 // ---------------------------------------------------------------------------
 // Commit path
 
@@ -345,10 +546,23 @@ export interface CommitRowInput {
 }
 
 export interface CommitResult {
+	/** Truly new gift rows inserted. */
 	giftsCreated: number;
+	/** Existing gifts that dedup linked to (no new row, status may advance). */
+	giftsLinked: number;
+	/** Existing siblings whose status was forward-transitioned via lifecycle
+	 *  events (e.g. ordered→shipped). Counts every sibling-advance event,
+	 *  including ones tied to linked-not-created gifts. */
+	siblingsAdvanced: number;
 	rowsSkipped: number;
 	rowsFailed: number;
 	labelMoveFailures: number;
+	/** Wave 1 Phase 2: rows where the LLM/heuristic could not confidently
+	 * decide which siblings shipped. Their shipment row was still
+	 * created, but no sibling advanced status; row is flagged with an
+	 * `error_message` describing the abstain so admin can manually
+	 * advance from /admin/system. */
+	rowsAbstained: number;
 }
 
 /**
@@ -365,9 +579,12 @@ export async function commitReviewedRows(
 	const db = getDb();
 	const result: CommitResult = {
 		giftsCreated: 0,
+		giftsLinked: 0,
+		siblingsAdvanced: 0,
 		rowsSkipped: 0,
 		rowsFailed: 0,
-		labelMoveFailures: 0
+		labelMoveFailures: 0,
+		rowsAbstained: 0
 	};
 
 	const rowStmt = db.prepare<[number], ImportRow>('SELECT * FROM import_rows WHERE id = ?');
@@ -392,6 +609,43 @@ export async function commitReviewedRows(
 		if (!byOrder.has(key)) byOrder.set(key, []);
 		byOrder.get(key)!.push(d);
 	}
+
+	// Wave 1 Phase 2: shipment-advance decisions need an async LLM call,
+	// but the commit loop is otherwise sync DB work.
+	//
+	// Codex round 4 P1: the planner feeds each sibling's CURRENT status
+	// into the LLM prompt. A pre-flight that plans all rows up front in
+	// parallel would build the `delivered` row's plan against stale
+	// `ordered`-status siblings before the same order's `shipped` row
+	// advances them. So we plan JIT — inside the commit loop, right
+	// before each shipment row's `applyLifecycleEvent`, after every
+	// earlier row in lifecycle order has already mutated state. The lost
+	// parallelism is negligible (batches are 1-3 rows in practice) and
+	// JIT-only is correct under every commit ordering.
+	//
+	// `computeShipmentPlan` is called once per shipment row from the
+	// commit loop. No memoization across rows — each call re-reads
+	// current sibling state. (The LLM matcher's own cache absorbs
+	// identical re-calls; its key now includes a sibling-status hash so
+	// a re-plan after a status change correctly misses the cache.)
+	const computeShipmentPlan = async (
+		row: ImportRow
+	): Promise<ShipmentAdvancePlan | null> => {
+		if (row.email_type !== 'shipped' && row.email_type !== 'delivered') return null;
+		if (!row.parsed_order_id) return null;
+		const order = getOrderByOrderId(row.parsed_order_id);
+		if (!order) return null;
+		const items = parseRowItems(row);
+		try {
+			return await planShipmentAdvanceForRow(row, order.id, items);
+		} catch (err) {
+			console.warn(`[amazon-import] shipment plan failed for row ${row.id}:`, err);
+			return {
+				kind: 'abstain',
+				reason: 'Planner threw; siblings held pending manual review.'
+			};
+		}
+	};
 
 	// Collect message ids to move in a single Gmail batchModify at the end —
 	// one round trip instead of one per message.
@@ -427,19 +681,26 @@ export async function commitReviewedRows(
 				try {
 					const items = parseRowItems(row);
 					const ids = commitMultiItemAccept(row, d.lineItems, items, userId);
-					result.giftsCreated += ids.length;
+					result.giftsCreated += ids.createdIds.length;
+					result.giftsLinked += ids.linkedIds.length;
 					// Use the first-item gift as the canonical id for the
 					// import_rows.gift_id column (one column, N gifts — pick
 					// the first stably). All N share the parent order_pk so
 					// follow-up emails advance the entire group.
-					giftId = ids[0] ?? null;
-					applyLifecycleEvent(giftId!, row, userId);
+					giftId = ids.allIds[0] ?? null;
+					// Codex2 P1 / Codex4 P1: plan JIT, right here, after this
+					// group's order_placed sibling has created the order AND
+					// any earlier shipment row has advanced sibling status.
+					const plan = await computeShipmentPlan(row);
+					const evt = applyLifecycleEvent(giftId!, row, userId, plan);
+					if (evt.abstained) result.rowsAbstained += 1;
+					result.siblingsAdvanced += evt.advancedCount;
 					updateRow.run(
 						'accepted',
 						giftId,
 						d.lineItems[0].assignedPersonId,
 						row.match_confidence ?? 'none',
-						null,
+						evt.abstainReason,
 						row.id
 					);
 					messagesToMove.push(row.source_message_id);
@@ -490,10 +751,18 @@ export async function commitReviewedRows(
 
 			try {
 				if (giftId == null) {
-					giftId = resolveOrCreateGift(row, personId, userId);
-					if (!row.gift_id) result.giftsCreated += 1;
+					const resolved = resolveOrCreateGift(row, personId, userId);
+					giftId = resolved.id;
+					if (resolved.created) result.giftsCreated += 1;
+					else result.giftsLinked += 1;
 				}
-				applyLifecycleEvent(giftId, row, userId);
+				// Codex2 P1 / Codex4 P1: plan JIT, right here, after this
+				// group's order_placed sibling has created the order AND
+				// any earlier shipment row has advanced sibling status.
+				const plan = await computeShipmentPlan(row);
+				const evt = applyLifecycleEvent(giftId, row, userId, plan);
+				if (evt.abstained) result.rowsAbstained += 1;
+				result.siblingsAdvanced += evt.advancedCount;
 				updateRow.run(
 					'accepted',
 					giftId,
@@ -501,7 +770,7 @@ export async function commitReviewedRows(
 					// Manual gift-link is an explicit human confirmation, so we record
 					// it as 'exact' — the schema CHECK only allows the existing enum.
 					linkedGift ? 'exact' : (row.match_confidence ?? 'none'),
-					null,
+					evt.abstainReason,
 					row.id
 				);
 				messagesToMove.push(row.source_message_id);
@@ -548,7 +817,11 @@ function lifecycleOrder(t: EmailType): number {
 	}
 }
 
-function resolveOrCreateGift(row: ImportRow, personId: number, userId: number): number {
+function resolveOrCreateGift(
+	row: ImportRow,
+	personId: number,
+	userId: number
+): { id: number; created: boolean } {
 	const db = getDb();
 	// td-3e9ae2: every Amazon import (single- or multi-item) gets an orders row.
 	// Returns null when there's no order_id (e.g. malformed email).
@@ -573,7 +846,7 @@ function resolveOrCreateGift(row: ImportRow, personId: number, userId: number): 
 					hit.id
 				);
 			}
-			return hit.id;
+			return { id: hit.id, created: false };
 		}
 	}
 	// Auto-create the Amazon vendor on first import so admins don't have to
@@ -599,7 +872,7 @@ function resolveOrCreateGift(row: ImportRow, personId: number, userId: number): 
 		},
 		userId
 	);
-	return gift.id;
+	return { id: gift.id, created: true };
 }
 
 /**
@@ -639,107 +912,308 @@ function lifecycleTimestamps(row: ImportRow): {
 }
 
 /**
- * td-3e9ae2: multi-item accept. Creates ONE order row and N gifts (one per
- * line item) when the admin specified per-line-item recipients in the review
- * UI. Returns the list of created gift ids in line-item order.
+ * Wave 1 Phase 3 (Codex review #3 + #4): multi-item accept with
+ * deterministic dedup.
+ *
+ * Before creating a fresh gift for each line item we look for an
+ * existing sibling under the same order_pk and route through the
+ * link-branch when found. Matching strategies, in order:
+ *
+ *   1. EXACT match by (order_pk, line_item_index) — the deterministic
+ *      common case where order_placed was committed and shipped/
+ *      delivered emails arrive later with the same item ordering.
+ *   2. CONTENT fingerprint match (`sha1(normalized title + price)`) —
+ *      covers the case where Amazon reordered the items between
+ *      emails. Fingerprint is composed from data the parser actually
+ *      extracts, so it's stable across email types.
+ *
+ * Recipient mismatch (admin picked person B for line item N but an
+ * existing sibling at that slot was created for person A) FAILS the
+ * commit with an explicit error rather than silently overriding. Per
+ * user's earlier "Refuse to commit; surface the conflict" choice.
+ *
+ * Wrapped in `db.transaction()` so partial failure rolls back all
+ * sibling operations for this row. The DB partial unique index on
+ * active `(order_pk, line_item_index)` (migration 025) is the final
+ * line of defense against duplicates if the matcher logic above is
+ * ever wrong.
  */
+export interface MultiItemAcceptResult {
+	createdIds: number[];
+	linkedIds: number[];
+	/** Concatenation in line-item order — kept for callers that want the
+	 * canonical "first gift" id without caring about created-vs-linked. */
+	allIds: number[];
+}
+
 function commitMultiItemAccept(
 	row: ImportRow,
 	lineItems: NonNullable<CommitRowInput['lineItems']>,
 	items: ParsedAmazonItem[],
 	userId: number
-): number[] {
+): MultiItemAcceptResult {
 	const orderPk = ensureOrderForRow(row, userId);
 	if (!orderPk) {
 		throw new Error(`Multi-item accept requires parsed_order_id, but row ${row.id} has none.`);
 	}
 	const amazonVendor = ensureVendor('Amazon', userId);
-	const createdGiftIds: number[] = [];
+	const db = getDb();
 
-	for (const li of lineItems) {
-		// Allow holes: a lineItem with no items[lineItemIndex] uses fallbacks
-		// from the row top-level (defensive — UI shouldn't send a bad index).
-		const item = items[li.lineItemIndex];
-		const title = item?.title ?? row.parsed_title ?? row.subject ?? '(imported)';
-		const priceCents = item?.priceCents ?? null;
+	// Pre-flight: load existing siblings under this order. Used for
+	// deterministic dedup against duplicate creation. `is_archived = 0`
+	// filter so cleanup-archived rows (migration 025) don't false-match.
+	const existingSiblings = db
+		.prepare<[number], Gift>(
+			`SELECT * FROM gifts WHERE order_pk = ? AND is_archived = 0`
+		)
+		.all(orderPk);
+	const byLineIndex = new Map<number, Gift>();
+	// Codex P1: when an order legitimately has two same-title items (e.g.
+	// the same gift bought twice for two different recipients), a
+	// `Map<string, Gift>` would lose one. Track the full list per
+	// fingerprint and disambiguate via line_item_index below.
+	const byFingerprint = new Map<string, Gift[]>();
+	for (const sib of existingSiblings) {
+		if (sib.line_item_index != null) byLineIndex.set(sib.line_item_index, sib);
+		const fp = giftFingerprint(sib.title);
+		const list = byFingerprint.get(fp);
+		if (list) list.push(sib);
+		else byFingerprint.set(fp, [sib]);
+	}
+	// Track which sibling ids we've already matched in this commit so a
+	// second incoming line item with the same fingerprint resolves to
+	// the OTHER sibling rather than re-using the first.
+	const consumedSiblingIds = new Set<number>();
+	const usedLineIndexes = new Set<number>(
+		existingSiblings.map((s) => s.line_item_index).filter((i): i is number => i != null)
+	);
+	const nextFreeLineIndex = (): number => {
+		let i = 0;
+		while (usedLineIndexes.has(i)) i++;
+		usedLineIndexes.add(i);
+		return i;
+	};
 
-		// Per-user privacy guard (td-68804e parity).
-		if (!isPersonVisibleToUser(li.assignedPersonId, userId)) {
-			throw new Error(
-				`Recipient not visible to you (archived or another user's self-person).`
-			);
-		}
+	return db.transaction((): MultiItemAcceptResult => {
+		const createdIds: number[] = [];
+		const linkedIds: number[] = [];
+		const allIds: number[] = [];
 
-		// Line-item-level link to an existing gift idea (weak-match acceptance).
-		if (li.assignedGiftId) {
-			const linked = getGiftById(li.assignedGiftId);
-			if (linked) {
+		for (const li of lineItems) {
+			// Allow holes: a lineItem with no items[lineItemIndex] uses
+			// fallbacks from the row top-level (defensive — UI shouldn't
+			// send a bad index).
+			const item = items[li.lineItemIndex];
+			const title = item?.title ?? row.parsed_title ?? row.subject ?? '(imported)';
+			const priceCents = item?.priceCents ?? null;
+
+			if (!isPersonVisibleToUser(li.assignedPersonId, userId)) {
+				throw new Error(
+					`Recipient not visible to you (archived or another user's self-person).`
+				);
+			}
+
+			// Resolve which existing gift (if any) this line item should
+			// link to instead of creating new.
+			//   1. Admin explicitly picked one in the UI (LLM verdict or
+			//      manual radio). That always wins.
+			//   2. Sibling exists with the same content fingerprint
+			//      (normalized title). Primary auto-match — Amazon's
+			//      emails frequently reorder items between order_placed
+			//      and shipped/delivered, so line_item_index alone is
+			//      unreliable.
+			//      When multiple siblings share a fingerprint (legit case:
+			//      same gift bought twice for two recipients — Codex P1),
+			//      disambiguate by line_item_index, then by un-consumed
+			//      candidates, and if still ambiguous fail loudly.
+			//   3. Sibling exists at the exact same line_item_index AND
+			//      title is missing/unparseable (fingerprint fallback).
+			let dedupTarget: Gift | null = null;
+			let dedupSource: 'admin' | 'fingerprint' | 'lineindex' | null = null;
+			if (li.assignedGiftId) {
+				dedupTarget = getGiftById(li.assignedGiftId) ?? null;
+				if (dedupTarget) dedupSource = 'admin';
+			}
+			if (!dedupTarget) {
+				const fp = giftFingerprint(title);
+				const candidatesAtFp = (byFingerprint.get(fp) ?? []).filter(
+					(g) => !consumedSiblingIds.has(g.id)
+				);
+				if (candidatesAtFp.length === 1) {
+					dedupTarget = candidatesAtFp[0];
+					dedupSource = 'fingerprint';
+				} else if (candidatesAtFp.length > 1) {
+					// Multiple siblings share this title — disambiguate by the
+					// incoming line_item_index first.
+					const byIdx = candidatesAtFp.find(
+						(g) => g.line_item_index === li.lineItemIndex
+					);
+					if (byIdx) {
+						dedupTarget = byIdx;
+						dedupSource = 'fingerprint';
+					} else {
+						// Then by chosen recipient — if exactly one sibling at
+						// this fingerprint matches the picked person, use it.
+						const byPerson = candidatesAtFp.filter(
+							(g) => g.person_id === li.assignedPersonId
+						);
+						if (byPerson.length === 1) {
+							dedupTarget = byPerson[0];
+							dedupSource = 'fingerprint';
+						} else {
+							// Truly ambiguous. Fail rather than relink the
+							// wrong sibling.
+							throw new Error(
+								`Ambiguous match: line item ${li.lineItemIndex} ("${title}") matches ${candidatesAtFp.length} existing siblings with the same title and no line_item_index or recipient discriminator — resolve manually before committing.`
+							);
+						}
+					}
+				}
+			}
+			if (!dedupTarget) {
+				// Fallback only when fingerprint dedup didn't fire — typically
+				// when the existing sibling and the incoming row share an idx
+				// AND the titles don't normalize to the same fingerprint.
+				// Rare. Kept for parity with legacy data where titles were
+				// truncated or generic.
+				const byIdx = byLineIndex.get(li.lineItemIndex);
+				if (
+					byIdx &&
+					!consumedSiblingIds.has(byIdx.id) &&
+					giftFingerprint(byIdx.title) === giftFingerprint(title)
+				) {
+					dedupTarget = byIdx;
+					dedupSource = 'lineindex';
+				}
+			}
+
+			if (dedupTarget) {
+				// Recipient-conflict check. Admin's explicit `assignedGiftId`
+				// (source = 'admin') overrides any prior recipient — they're
+				// telling the system to relink. The auto-match paths refuse
+				// to override silently.
+				if (
+					dedupSource !== 'admin' &&
+					dedupTarget.person_id !== li.assignedPersonId
+				) {
+					throw new Error(
+						`Recipient conflict: existing gift #${dedupTarget.id} ("${dedupTarget.title}") is for person ${dedupTarget.person_id}; commit picked person ${li.assignedPersonId}. Resolve via the gift edit page before committing.`
+					);
+				}
+
 				updateGift(
-					linked.id,
+					dedupTarget.id,
 					{
 						order_id: row.parsed_order_id,
-						tracking_number: row.parsed_tracking_number ?? linked.tracking_number,
-						carrier: row.parsed_carrier ?? linked.carrier,
+						tracking_number:
+							row.parsed_tracking_number ?? dedupTarget.tracking_number,
+						carrier: row.parsed_carrier ?? dedupTarget.carrier,
 						amazon_tracking_url:
-							row.parsed_amazon_tracking_url ?? linked.amazon_tracking_url,
-						price_cents: priceCents ?? linked.price_cents
+							row.parsed_amazon_tracking_url ?? dedupTarget.amazon_tracking_url,
+						price_cents: priceCents ?? dedupTarget.price_cents
 					},
 					userId
 				);
-				// Attach to the order + record line-item position. updateGift
-				// doesn't expose order_pk; touch directly.
-				getDb()
-					.prepare('UPDATE gifts SET order_pk = ?, line_item_index = ? WHERE id = ?')
-					.run(orderPk, li.lineItemIndex, linked.id);
-				// Forward-transition from idea/planned to ordered.
-				if (canTransition(linked.status, 'ordered')) {
-					transitionGift(linked.id, 'ordered', userId);
+				// Stamp order_pk only. line_item_index stays as set by the
+				// FIRST email to touch this gift (canonically the
+				// order_placed email's enumeration). Updating it now would
+				// collide with the partial unique index when Amazon
+				// reordered items between emails.
+				if (dedupTarget.line_item_index == null) {
+					db.prepare(
+						'UPDATE gifts SET order_pk = ?, line_item_index = ? WHERE id = ?'
+					).run(orderPk, li.lineItemIndex, dedupTarget.id);
+					usedLineIndexes.add(li.lineItemIndex);
+				} else {
+					db.prepare('UPDATE gifts SET order_pk = ? WHERE id = ?').run(
+						orderPk,
+						dedupTarget.id
+					);
 				}
-				createdGiftIds.push(linked.id);
+				if (canTransition(dedupTarget.status, 'ordered')) {
+					transitionGift(dedupTarget.id, 'ordered', userId);
+				}
+				consumedSiblingIds.add(dedupTarget.id);
+				linkedIds.push(dedupTarget.id);
+				allIds.push(dedupTarget.id);
 				continue;
 			}
-		}
 
-		const gift = createGift(
-			{
-				person_id: li.assignedPersonId,
-				title,
-				vendor_id: amazonVendor.id,
-				occasion_id: null,
-				occasion_year: new Date().getFullYear(),
-				order_id: row.parsed_order_id,
-				tracking_number: row.parsed_tracking_number,
-				carrier: row.parsed_carrier,
-				price_cents: priceCents,
-				notes: row.parsed_gift_message ?? null,
-				status: 'ordered',
-				is_idea: false,
-				amazon_tracking_url: row.parsed_amazon_tracking_url,
-				order_pk: orderPk,
-				line_item_index: li.lineItemIndex
-			},
-			userId
-		);
-		createdGiftIds.push(gift.id);
-	}
-	return createdGiftIds;
+			// Create new. If li.lineItemIndex is already taken by an
+			// existing sibling (different content), pick the next free
+			// index so we don't collide with the unique index.
+			const insertIdx = usedLineIndexes.has(li.lineItemIndex)
+				? nextFreeLineIndex()
+				: (usedLineIndexes.add(li.lineItemIndex), li.lineItemIndex);
+			const gift = createGift(
+				{
+					person_id: li.assignedPersonId,
+					title,
+					vendor_id: amazonVendor.id,
+					occasion_id: null,
+					occasion_year: new Date().getFullYear(),
+					order_id: row.parsed_order_id,
+					tracking_number: row.parsed_tracking_number,
+					carrier: row.parsed_carrier,
+					price_cents: priceCents,
+					notes: row.parsed_gift_message ?? null,
+					status: 'ordered',
+					is_idea: false,
+					amazon_tracking_url: row.parsed_amazon_tracking_url,
+					order_pk: orderPk,
+					line_item_index: insertIdx
+				},
+				userId
+			);
+			createdIds.push(gift.id);
+			allIds.push(gift.id);
+		}
+		return { createdIds, linkedIds, allIds };
+	})();
 }
 
-function applyLifecycleEvent(giftId: number, row: ImportRow, userId: number): void {
-	// td-3e9ae2 / td-d08902: an order can fan out to N gifts (multi-recipient
-	// case) and can ship in multiple batches. Lifecycle handling:
+/** Wave 1 Phase 3: stable content fingerprint for an Amazon line item.
+ * Normalized lowercased title with whitespace collapsed. Price is
+ * NOT part of the fingerprint — Amazon's parser populates price on
+ * some emails but not others (order_placed enumerates differently
+ * than shipped/delivered for the same item), so price-sensitivity
+ * would cause false-misses across email types. The denomination
+ * itself is typically present in the title for fixed-amount items
+ * ("MasterCard ... $100"), so title-only fingerprints distinguish
+ * the two MasterCard items without needing the parsed price. */
+export function giftFingerprint(title: string): string {
+	return title.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+export interface LifecycleEventResult {
+	abstained: boolean;
+	abstainReason: string | null;
+	shipmentId: number | null;
+	/** Count of siblings whose status was forward-transitioned by this event. */
+	advancedCount: number;
+}
+
+function applyLifecycleEvent(
+	giftId: number,
+	row: ImportRow,
+	userId: number,
+	shipmentPlan: ShipmentAdvancePlan | null = null
+): LifecycleEventResult {
+	// Wave 1 Phase 2 (Codex review #2): the silent "advance ALL siblings"
+	// fallback is gone. Lifecycle handling:
 	//
-	//   order_placed: refresh order facts; advance ALL siblings to 'ordered'
-	//                 (no shipment yet, applies to whole order).
-	//   shipped:      create/find an order_shipments row from the email's
-	//                 tracking facts; advance ONLY the siblings whose titles
-	//                 match items in this shipment's email body. If the
-	//                 email doesn't enumerate items (single-item shipping
-	//                 notification), advance all siblings as before.
-	//   delivered:    same as shipped, but bumps delivered_at on shipment +
-	//                 advances matched siblings to 'delivered'.
+	//   order_placed: refresh order facts; advance ALL siblings to 'ordered'.
+	//   shipped:      create/find an order_shipments row from this email's
+	//                 tracking facts; advance ONLY the siblings the
+	//                 pre-flight shipment plan identified. When the plan
+	//                 abstains (LLM uncertain), the shipment row is still
+	//                 created (tracking info is real) but NO siblings
+	//                 advance — caller surfaces the abstain to admin.
+	//   delivered:    same as shipped, with delivered_at + status target.
 	const seed = getGiftById(giftId);
-	if (!seed) return;
+	if (!seed) {
+		return { abstained: false, abstainReason: null, shipmentId: null, advancedCount: 0 };
+	}
 	let siblings: Gift[] = [seed];
 	if (seed.order_pk) {
 		const sibs = listGiftsForOrder(seed.order_pk);
@@ -753,27 +1227,14 @@ function applyLifecycleEvent(giftId: number, row: ImportRow, userId: number): vo
 	const target = lifecycleStatus(row.email_type);
 	const isShipmentEvent = row.email_type === 'shipped' || row.email_type === 'delivered';
 
-	// td-d08902: for shipment events on a known parent order, capture the
-	// shipment row first, then narrow siblings to those actually in this box.
 	let shipmentId: number | null = null;
-	let advanceSiblings = siblings;
+	let advanceSiblings: Gift[] = siblings;
+	let abstained = false;
+	let abstainReason: string | null = null;
 	if (isShipmentEvent && seed.order_pk) {
-		const shipmentItems = parseRowItems(row);
-		const shippedTitles = shipmentItems.map((it) => it.title).filter((t): t is string => !!t);
-		const { matched, itemsHadTitles } = matchSiblingsToShipment(siblings, shippedTitles);
-		if (itemsHadTitles && matched.length === 0) {
-			// Items enumerated but none fuzzy-matched — fall back to advancing
-			// all siblings rather than no-op'ing, but log so the parser/matcher
-			// gap is visible. Real failure mode would be Amazon renaming items
-			// in the shipping notification body.
-			console.warn(
-				`[amazon-import] shipment items present but no sibling match: order=${row.parsed_order_id ?? '∅'} items=${JSON.stringify(shippedTitles)} sibling_titles=${JSON.stringify(siblings.map((s) => s.title))}`
-			);
-			advanceSiblings = siblings;
-		} else {
-			advanceSiblings = matched;
-		}
-
+		// Always create the shipment row — tracking info is real data and
+		// belongs in the DB regardless of whether we can decide which
+		// siblings are in the box.
 		shipmentId = upsertShipment({
 			order_pk: seed.order_pk,
 			tracking_number: row.parsed_tracking_number,
@@ -784,8 +1245,41 @@ function applyLifecycleEvent(giftId: number, row: ImportRow, userId: number): vo
 			source_message_id: row.source_message_id,
 			items_json: row.parsed_items_json
 		});
+
+		// If the caller didn't pre-compute a plan (e.g. the order_placed
+		// flow that synthesizes a shipped-event from a different email
+		// type), fall back to the heuristic-only path here. The pre-flight
+		// path in commitReviewedRows is the normal entry.
+		if (shipmentPlan) {
+			if (shipmentPlan.kind === 'abstain') {
+				abstained = true;
+				abstainReason = shipmentPlan.reason;
+				advanceSiblings = [];
+			} else {
+				const matchedSet = new Set(shipmentPlan.matchedSiblingIds);
+				advanceSiblings = siblings.filter((s) => matchedSet.has(s.id));
+			}
+		} else {
+			const shipmentItems = parseRowItems(row);
+			const shippedTitles = shipmentItems
+				.map((it) => it.title)
+				.filter((t): t is string => !!t);
+			const heuristic = matchSiblingsToShipment(siblings, shippedTitles);
+			if (heuristic.heuristicCertain) {
+				advanceSiblings = heuristic.matched;
+			} else {
+				// No pre-flight plan, no heuristic certainty. Be safe: don't
+				// advance anything, surface the abstain. Pre-flight is the
+				// path that gives the LLM a chance; without it we don't gamble.
+				abstained = true;
+				abstainReason =
+					'Heuristic uncertain and no LLM pre-flight ran. Holding sibling status pending manual review.';
+				advanceSiblings = [];
+			}
+		}
 	}
 
+	let advancedCount = 0;
 	for (const current of siblings) {
 		const isAdvancing = advanceSiblings.some((s) => s.id === current.id);
 
@@ -821,9 +1315,11 @@ function applyLifecycleEvent(giftId: number, row: ImportRow, userId: number): vo
 			const fresh = getGiftById(current.id)!;
 			if (canTransition(fresh.status, target)) {
 				transitionGift(current.id, target, userId);
+				advancedCount += 1;
 			}
 		}
 	}
+	return { abstained, abstainReason, shipmentId, advancedCount };
 }
 
 function lifecycleStatus(t: EmailType): GiftStatus | null {

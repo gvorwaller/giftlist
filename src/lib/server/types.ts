@@ -284,9 +284,18 @@ export interface ImportRow {
 	 * `[{title, priceCents, quantity}, ...]`. Null on legacy single-item rows
 	 * and on non-gift emails — caller falls back to parsed_title. */
 	parsed_items_json: string | null;
+	/** Wave 1 (migration 026): up to 4000 chars of the raw body text,
+	 * captured only when the items[] extractor came up empty. Fed to the
+	 * LLM matcher as fallback context. NULL when items[] is populated
+	 * (which is the common case). */
+	parsed_body_excerpt: string | null;
 	match_person_id: number | null;
 	match_confidence: MatchConfidence | null;
 	match_candidates_json: string | null;
+	/** Wave 1 (migration 023): persisted LLM matcher verdict — full
+	 * `LlmMatchVerdict` JSON shape from src/lib/server/llm-matcher.ts. NULL
+	 * until the matcher has run on this row; cleared when admin force-refreshes. */
+	llm_verdict_json: string | null;
 	disposition: ImportRowDisposition;
 	gift_id: number | null;
 	error_message: string | null;
