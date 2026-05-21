@@ -22,7 +22,9 @@ import {
 } from '../orders';
 import { rankCandidatesForImport, rankCandidatesForItems } from '../gift-matcher';
 import { getActiveExclusionKeywords, matchExcluded } from '../exclusion-keywords';
-import { llmMatchImportRow } from '../llm-matcher';
+import { llmMatchImportRow, type LlmMatchVerdict } from '../llm-matcher';
+import { detectOverride, invalidateCacheKey, sweepExpiredCache } from '../matcher-feedback';
+import { getBoolFlag } from '../app-state';
 import { planShipmentAdvanceForRow, type ShipmentAdvancePlan } from '../shipment-decider';
 import type { ParsedAmazonItem } from '../amazon-parser';
 import type {
@@ -50,6 +52,7 @@ export interface ScanResult {
 	existingRows: number;
 	autoMoved: number;
 	excludedItems: number;
+	autoAccepted: number;
 }
 
 function setRunStatus(
@@ -340,6 +343,21 @@ export async function runAmazonScan(
 			}
 
 			bumpCounts(run.id, { parsed_count: parsed });
+
+			// Phase B (td-dbaa0c): if enabled, auto-accept link-only
+			// high-confidence rows right after staging so they never hit the
+			// review queue. Default OFF — opt-in via the /admin/system toggle
+			// once the manual "Commit all high-confidence" button is trusted.
+			let autoAccepted = 0;
+			if (getBoolFlag(AUTO_ACCEPT_FLAG)) {
+				try {
+					const aa = await autoAcceptHighConfidenceRows(run.id, userId);
+					autoAccepted = aa.accepted;
+				} catch (err) {
+					console.warn('[amazon-import] auto-accept pass failed (non-fatal):', err);
+				}
+			}
+
 			setRunStatus(run.id, 'ready_for_review');
 
 			logAudit({
@@ -347,7 +365,7 @@ export async function runAmazonScan(
 				entityType: 'import',
 				entityId: run.id,
 				action: 'amazon_scan',
-				summary: `Scanned ${summaries.length} messages; staged ${newRows} new (${existing} already staged)${autoMoved > 0 ? `; moved ${autoMoved} auto-skipped to processed` : ''}${excludedItems > 0 ? `; excluded ${excludedItems} item(s) via keywords` : ''}`
+				summary: `Scanned ${summaries.length} messages; staged ${newRows} new (${existing} already staged)${autoMoved > 0 ? `; moved ${autoMoved} auto-skipped to processed` : ''}${excludedItems > 0 ? `; excluded ${excludedItems} item(s) via keywords` : ''}${autoAccepted > 0 ? `; auto-accepted ${autoAccepted}` : ''}`
 			});
 
 			return {
@@ -357,12 +375,13 @@ export async function runAmazonScan(
 				newRows,
 				existingRows: existing,
 				autoMoved,
-				excludedItems
+				excludedItems,
+				autoAccepted
 			};
 		},
 		{
 			summarize: (r) =>
-				`run ${r.runId} — fetched ${r.fetched}, ${r.newRows} new rows, ${r.existingRows} already staged${r.autoMoved > 0 ? `, ${r.autoMoved} auto-moved` : ''}${r.excludedItems > 0 ? `, ${r.excludedItems} excluded` : ''}`
+				`run ${r.runId} — fetched ${r.fetched}, ${r.newRows} new rows, ${r.existingRows} already staged${r.autoMoved > 0 ? `, ${r.autoMoved} auto-moved` : ''}${r.excludedItems > 0 ? `, ${r.excludedItems} excluded` : ''}${r.autoAccepted > 0 ? `, ${r.autoAccepted} auto-accepted` : ''}`
 		}
 	);
 }
@@ -753,6 +772,10 @@ export async function commitReviewedRows(
 						evt.abstainReason,
 						row.id
 					);
+					// Phase 4 (4c): admin's commit disagreed with the LLM → drop the
+					// stale cache entry so the wrong verdict stops replaying for 7 days.
+					const ov = detectOverride(row, d);
+					if (ov && ov.action !== 'agree') invalidateCacheKey(ov.cacheKey);
 					messagesToMove.push(row.source_message_id);
 					continue;
 				} catch (err) {
@@ -823,6 +846,10 @@ export async function commitReviewedRows(
 					evt.abstainReason,
 					row.id
 				);
+				// Phase 4 (4c): admin's commit disagreed with the LLM → drop the
+				// stale cache entry so the wrong verdict stops replaying for 7 days.
+				const ov = detectOverride(row, d);
+				if (ov && ov.action !== 'agree') invalidateCacheKey(ov.cacheKey);
 				messagesToMove.push(row.source_message_id);
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
@@ -852,6 +879,111 @@ export async function commitReviewedRows(
 	}
 
 	return result;
+}
+
+export const AUTO_ACCEPT_FLAG = 'amazon_auto_accept_enabled';
+
+function parseVerdictJson(json: string | null): LlmMatchVerdict | null {
+	if (!json) return null;
+	try {
+		const o = JSON.parse(json);
+		if (o && typeof o === 'object' && Array.isArray(o.matches)) return o as LlmMatchVerdict;
+	} catch {
+		// fall through
+	}
+	return null;
+}
+
+/**
+ * Phase B (td-dbaa0c) — link-only auto-accept gate. A row qualifies ONLY
+ * when EVERY non-excluded item is a `high`-confidence match to an existing,
+ * non-archived gift. We never auto-CREATE a gift here (create-new needs a
+ * stricter recipient gate — deferred). Returns the CommitRowInput to link
+ * those gifts, or null if the row needs human review.
+ *
+ * Shipment-row status advances stay governed by the shipment-decider abstain
+ * at commit time, so auto-accepting a confidently-linked shipped/delivered
+ * row is safe: the abstain still holds sibling status when uncertain.
+ */
+function autoAcceptDecisionForRow(
+	row: ImportRow,
+	exclusions: ReturnType<typeof getActiveExclusionKeywords>
+): CommitRowInput | null {
+	if (row.disposition !== 'pending') return null;
+	const verdict = parseVerdictJson(row.llm_verdict_json);
+	if (!verdict || verdict.matches.length === 0) return null;
+	const items = parseRowItems(row);
+	const matchByIdx = new Map(verdict.matches.map((m) => [m.itemIndex, m]));
+
+	// Returns the linked gift's person_id, or null if this isn't a
+	// high-confidence link to a live existing gift.
+	const linkPerson = (giftId: number | null, confidence: string): number | null => {
+		if (confidence !== 'high' || giftId == null) return null;
+		const g = getGiftById(giftId);
+		if (!g || g.is_archived) return null;
+		return g.person_id;
+	};
+
+	if (items.length > 1) {
+		const lineItems: NonNullable<CommitRowInput['lineItems']> = [];
+		for (let idx = 0; idx < items.length; idx++) {
+			if (matchExcluded(items[idx].title, exclusions)) continue; // excluded → not committed
+			const m = matchByIdx.get(idx);
+			if (!m) return null; // a live item with no verdict entry → not sure → bail
+			const personId = linkPerson(m.giftId, m.confidence);
+			if (personId == null) return null; // not a high-confidence existing link → bail
+			lineItems.push({ lineItemIndex: idx, assignedPersonId: personId, assignedGiftId: m.giftId! });
+		}
+		if (lineItems.length === 0) return null;
+		return { rowId: row.id, action: 'accept', lineItems };
+	}
+
+	// Single-item row: the live title is items[0] or the legacy parsed_title.
+	const title = items[0]?.title ?? row.parsed_title;
+	if (title && matchExcluded(title, exclusions)) return null;
+	const m = matchByIdx.get(0) ?? verdict.matches[0];
+	if (!m) return null;
+	const personId = linkPerson(m.giftId, m.confidence);
+	if (personId == null) return null;
+	return { rowId: row.id, action: 'accept', assignedGiftId: m.giftId! };
+}
+
+/** Build the link-only auto-accept decisions for a set of rows. */
+export function buildAutoAcceptDecisions(rows: ImportRow[]): CommitRowInput[] {
+	const exclusions = getActiveExclusionKeywords();
+	const out: CommitRowInput[] = [];
+	for (const row of rows) {
+		const decision = autoAcceptDecisionForRow(row, exclusions);
+		if (decision) out.push(decision);
+	}
+	return out;
+}
+
+/** Count of pending rows in a run that qualify for auto-accept (button label). */
+export function countAutoAcceptable(runId: number): number {
+	return buildAutoAcceptDecisions(listRowsForRun(runId, 'pending')).length;
+}
+
+/**
+ * Commit every auto-acceptable pending row in a run. Shared by the manual
+ * "Commit all high-confidence" button and the (toggle-gated) automatic
+ * scan path. Audit-logged so auto-accepts are never invisible.
+ */
+export async function autoAcceptHighConfidenceRows(
+	runId: number,
+	userId: number
+): Promise<{ accepted: number; advanced: number }> {
+	const decisions = buildAutoAcceptDecisions(listRowsForRun(runId, 'pending'));
+	if (decisions.length === 0) return { accepted: 0, advanced: 0 };
+	const result = await commitReviewedRows(userId, decisions);
+	logAudit({
+		actorUserId: userId,
+		entityType: 'import',
+		entityId: runId,
+		action: 'amazon_auto_accept',
+		summary: `Auto-accepted ${result.giftsLinked} high-confidence match(es); advanced ${result.siblingsAdvanced} sibling status(es).`
+	});
+	return { accepted: decisions.length, advanced: result.siblingsAdvanced };
 }
 
 function lifecycleOrder(t: EmailType): number {
@@ -1563,15 +1695,22 @@ export async function runProcessedCleanup(
 	opts?: { olderThanDays?: number }
 ): Promise<JobResult<{ trashed: number }>> {
 	const days = opts?.olderThanDays ?? PROCESSED_RETENTION_DAYS;
-	return runJob<{ trashed: number }>(
+	return runJob<{ trashed: number; cacheSwept: number }>(
 		CLEANUP_JOB,
 		async () => {
 			const trashed = await trashMessagesUnderLabel(userId, PROCESSED_LABEL, {
 				olderThanDays: days
 			});
-			return { trashed };
+			// Phase 4 (4a): the same weekly window also sweeps expired LLM
+			// matcher cache rows so the table doesn't grow unbounded. Reads
+			// already ignore expired rows; this actually deletes them.
+			const cacheSwept = sweepExpiredCache();
+			return { trashed, cacheSwept };
 		},
-		{ summarize: (r) => `Trashed ${r.trashed} messages older than ${days}d from ${PROCESSED_LABEL}` }
+		{
+			summarize: (r) =>
+				`Trashed ${r.trashed} messages older than ${days}d from ${PROCESSED_LABEL}; swept ${r.cacheSwept} expired cache row(s)`
+		}
 	);
 }
 

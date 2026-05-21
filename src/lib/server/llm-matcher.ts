@@ -65,6 +65,14 @@ export interface LlmMatchVerdict {
 	model: string;
 	prompt_version: string;
 	created_at: string;
+	/**
+	 * The versioned cache key this verdict was stored under (Phase 4). Threaded
+	 * onto the verdict so it travels with the persisted import_rows.llm_verdict_json,
+	 * letting the commit path invalidate the entry on admin override without
+	 * rebuilding the candidate shortlist. Optional: pre-Phase-4 cached verdicts
+	 * lack it and fall through to TTL expiry.
+	 */
+	cache_key?: string;
 }
 
 // -----------------------------------------------------------------------
@@ -138,7 +146,10 @@ export async function llmMatchImportRow(input: ImportMatchInput): Promise<LlmMat
 
 	const key = importCacheKey(input);
 	const cached = readCache(key);
-	if (cached) return cached;
+	if (cached) {
+		cached.cache_key = key; // ensure it's present even on rows cached pre-Phase-4
+		return cached;
+	}
 
 	const verdict = await callLlm({
 		mode: 'import',
@@ -146,6 +157,7 @@ export async function llmMatchImportRow(input: ImportMatchInput): Promise<LlmMat
 		userBlocks: buildImportUserMessage(input)
 	});
 	if (!verdict) return null;
+	verdict.cache_key = key;
 	writeCache(key, 'import', verdict);
 	return verdict;
 }
@@ -164,7 +176,10 @@ export async function llmMatchShipment(
 
 	const key = shipmentCacheKey(input);
 	const cached = readCache(key);
-	if (cached) return cached;
+	if (cached) {
+		cached.cache_key = key; // ensure it's present even on rows cached pre-Phase-4
+		return cached;
+	}
 
 	const verdict = await callLlm({
 		mode: 'shipment',
@@ -178,6 +193,7 @@ export async function llmMatchShipment(
 		verdict.safe_to_apply &&
 		verdict.unmatched_items.length === 0 &&
 		verdict.matches.every((m) => m.confidence === 'high');
+	verdict.cache_key = key;
 	writeCache(key, 'shipment', verdict);
 	return verdict;
 }

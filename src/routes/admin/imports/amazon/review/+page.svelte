@@ -110,6 +110,8 @@
 	// td-8360f4: exclusion add flash.
 	const flashExcludedKw = $derived($page.url.searchParams.get('excluded_kw'));
 	const flashExcludeError = $derived($page.url.searchParams.get('exclude_error'));
+	// td-dbaa0c: auto-accept (high-confidence) flash.
+	const flashAutoAccepted = $derived(Number($page.url.searchParams.get('auto_accepted') ?? '0'));
 	const flashCommitTotal = $derived(
 		flashCreated + flashLinked + flashSkipped + flashFailed + flashAbstained
 	);
@@ -219,6 +221,14 @@
 		</div>
 	{/if}
 
+	{#if flashAutoAccepted > 0}
+		<div class="flash ok" role="status">
+			Auto-accepted <strong>{flashAutoAccepted}</strong> high-confidence
+			match{flashAutoAccepted === 1 ? '' : 'es'} — linked to existing gifts and moved to
+			Processed.
+		</div>
+	{/if}
+
 	{#if pending.length > 0}
 		<form method="POST" action="?/reevaluateMatches" class="llm-tools">
 			<input type="hidden" name="run_id" value={data.run.id} />
@@ -227,6 +237,21 @@
 				Re-runs Opus against the current open-gifts list — picks up any gifts you've
 				added or edited since the scan. Cached per-context, so unchanged rows return
 				instantly.
+			</span>
+		</form>
+	{/if}
+
+	{#if data.autoAcceptableCount > 0}
+		<form method="POST" action="?/commitHighConfidence" class="llm-tools">
+			<input type="hidden" name="run_id" value={data.run.id} />
+			<button type="submit" class="primary">
+				Commit {data.autoAcceptableCount} high-confidence match{data.autoAcceptableCount === 1
+					? ''
+					: 'es'}
+			</button>
+			<span class="muted-inline">
+				One-click commit for rows where every item is a high-confidence match to a gift you
+				already created. Skips nothing ambiguous — those stay below for review.
 			</span>
 		</form>
 	{/if}

@@ -220,6 +220,53 @@
 		{/if}
 	</section>
 
+	<section class="card">
+		<p class="eyebrow">Automatic auto-accept</p>
+		<div class="row">
+			<div>
+				<p class="body">
+					Daily scan auto-accept is
+					<strong class={data.autoAccept.enabled ? 'ok' : 'warn'}>
+						{data.autoAccept.enabled ? 'ON' : 'OFF'}
+					</strong>.
+				</p>
+				<p class="muted">
+					When on, the daily scan auto-commits rows where every item is a high-confidence
+					match to a gift you already created (link-only — never creates a new gift), so
+					they never reach the review queue. Try the "Commit all high-confidence" button on
+					the review page first; enable this once you trust it.
+				</p>
+			</div>
+			<form method="POST" action="?/toggleAutoAccept">
+				<button type="submit" class="primary">
+					{data.autoAccept.enabled ? 'Turn off' : 'Turn on'}
+				</button>
+			</form>
+		</div>
+	</section>
+
+	<section class="card">
+		<p class="eyebrow">LLM matcher cache</p>
+		<div class="row">
+			<div>
+				<p class="body">
+					{data.llmCache.count}
+					cached {data.llmCache.count === 1 ? 'verdict' : 'verdicts'}.
+				</p>
+				<p class="muted">
+					Opus match verdicts are cached for 7 days and swept weekly. Clear them to
+					force fresh matches now — e.g. after editing or adding a batch of gifts.
+					Safe: this touches no gift data, verdicts just regenerate on the next scan.
+				</p>
+			</div>
+			<form method="POST" action="?/clearLlmCache">
+				<button type="submit" class="primary" disabled={data.llmCache.count === 0}>
+					Clear LLM cache
+				</button>
+			</form>
+		</div>
+	</section>
+
 	<!-- td-dc1846 -->
 	<section class="card">
 		<p class="eyebrow">Archived</p>

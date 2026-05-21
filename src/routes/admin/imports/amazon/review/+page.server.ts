@@ -2,7 +2,9 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { listPeople } from '$server/people';
 import {
+	autoAcceptHighConfidenceRows,
 	commitReviewedRows,
+	countAutoAcceptable,
 	getLatestRun,
 	getRun,
 	listRowsForRun,
@@ -305,7 +307,10 @@ export const load: PageServerLoad = ({ locals, url }) => {
 		heldSiblings,
 		heldTargets,
 		excludedItemKeys,
-		excludedRowTitles
+		excludedRowTitles,
+		// Phase B (td-dbaa0c): how many pending rows the link-only gate would
+		// auto-accept right now — drives the "Commit all high-confidence" button.
+		autoAcceptableCount: countAutoAcceptable(run.id)
 	};
 };
 
@@ -391,6 +396,22 @@ export const actions: Actions = {
 		qs.set('failed', String(result.rowsFailed));
 		if (result.labelMoveFailures > 0) qs.set('move_failures', String(result.labelMoveFailures));
 		if (result.rowsAbstained > 0) qs.set('abstained', String(result.rowsAbstained));
+		throw redirect(303, `/admin/imports/amazon/review?${qs.toString()}`);
+	},
+
+	// Phase B (td-dbaa0c): one-click commit of every pending row the link-only
+	// gate considers safe (every item a high-confidence match to an existing
+	// gift). Same code path the automatic scan uses when the toggle is on.
+	commitHighConfidence: async ({ locals, request }) => {
+		if (!locals.user) throw redirect(303, '/login');
+		const fd = await request.formData();
+		const runId = Number(fd.get('run_id'));
+		if (!Number.isFinite(runId)) return fail(400, { error: 'Missing run id.' });
+		const result = await autoAcceptHighConfidenceRows(runId, locals.user.id);
+		const qs = new URLSearchParams();
+		qs.set('run', String(runId));
+		qs.set('auto_accepted', String(result.accepted));
+		if (result.advanced > 0) qs.set('advanced', String(result.advanced));
 		throw redirect(303, `/admin/imports/amazon/review?${qs.toString()}`);
 	},
 

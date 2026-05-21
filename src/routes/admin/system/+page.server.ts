@@ -11,6 +11,9 @@ import { TRACKING_REFRESH_JOB, runTrackingRefresh } from '$server/jobs/tracking-
 import { isTrackingProviderConfigured } from '$server/tracking';
 import { lastBackupIso } from '$server/admin-home';
 import { configuredChannels } from '$server/notify';
+import { clearAllCache, countCacheRows } from '$server/matcher-feedback';
+import { AUTO_ACCEPT_FLAG } from '$server/jobs/amazon-import';
+import { getBoolFlag, setBoolFlag } from '$server/app-state';
 
 export const load: PageServerLoad = ({ locals }) => {
 	if (!locals.user) throw redirect(303, '/login');
@@ -41,6 +44,12 @@ export const load: PageServerLoad = ({ locals }) => {
 			name: TRACKING_REFRESH_JOB,
 			lastRun: trackingLast ?? null,
 			configured: isTrackingProviderConfigured()
+		},
+		llmCache: {
+			count: countCacheRows()
+		},
+		autoAccept: {
+			enabled: getBoolFlag(AUTO_ACCEPT_FLAG)
 		}
 	};
 };
@@ -104,5 +113,33 @@ export const actions: Actions = {
 			const message = err instanceof Error ? err.message : String(err);
 			return fail(409, { error: message });
 		}
+	},
+
+	// Phase 4 (4b): manually nuke the LLM matcher cache. Non-destructive to
+	// gift data — verdicts simply regenerate on the next scan/review. Useful
+	// after a bulk gift edit when the admin wants fresh matches now instead of
+	// waiting out the 7-day TTL.
+	clearLlmCache: async ({ locals }) => {
+		if (!locals.user) throw redirect(303, '/login');
+		try {
+			const count = clearAllCache();
+			return { ok: true, summary: `Cleared LLM matcher cache (${count} entr${count === 1 ? 'y' : 'ies'})` };
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return fail(409, { error: message });
+		}
+	},
+
+	// Phase B (td-dbaa0c): flip the daily-scan auto-accept toggle. Off by
+	// default; turn on once the manual "Commit all high-confidence" button
+	// has earned trust. Link-only — never auto-creates a gift.
+	toggleAutoAccept: async ({ locals }) => {
+		if (!locals.user) throw redirect(303, '/login');
+		const now = getBoolFlag(AUTO_ACCEPT_FLAG);
+		setBoolFlag(AUTO_ACCEPT_FLAG, !now);
+		return {
+			ok: true,
+			summary: `Automatic auto-accept ${!now ? 'enabled' : 'disabled'}.`
+		};
 	}
 };
