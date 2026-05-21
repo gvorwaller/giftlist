@@ -82,6 +82,11 @@
 
 	let confirmingSkipAll = $state(false);
 	let expandedHandledRowId = $state<number | null>(null);
+	// td-8360f4: at most one per-item "Exclude" trim panel is open at a time
+	// (key = `${rowId}:${idx}` for line items, `single:${rowId}` for single-
+	// item rows). Keeping it to one means only one `keyword` input exists in
+	// the commit form when the admin submits it to ?/excludeItem.
+	let excludePanelKey = $state<string | null>(null);
 
 	function priceDollarsOrEmpty(c: number | null | undefined): string {
 		return c == null ? '' : `$${(c / 100).toFixed(2)}`;
@@ -102,6 +107,9 @@
 	const flashRetried = $derived(Number($page.url.searchParams.get('retried') ?? '0'));
 	const flashRematched = $derived(Number($page.url.searchParams.get('rematched') ?? '0'));
 	const flashResolvedHeld = $derived($page.url.searchParams.get('resolved_held'));
+	// td-8360f4: exclusion add flash.
+	const flashExcludedKw = $derived($page.url.searchParams.get('excluded_kw'));
+	const flashExcludeError = $derived($page.url.searchParams.get('exclude_error'));
 	const flashCommitTotal = $derived(
 		flashCreated + flashLinked + flashSkipped + flashFailed + flashAbstained
 	);
@@ -185,6 +193,16 @@
 		<div class="flash err" role="alert">{form.error}</div>
 	{/if}
 
+	{#if flashExcludedKw}
+		<div class="flash ok" role="status">
+			Added exclusion keyword “{flashExcludedKw}”. Matching items are now hidden across this run.
+			<a href="/admin/exclusion-keywords">Manage exclusions →</a>
+		</div>
+	{/if}
+	{#if flashExcludeError}
+		<div class="flash err" role="alert">{flashExcludeError}</div>
+	{/if}
+
 	<!-- Wave 1: LLM re-run flash. New shape (succeeded vs failed) tracks the
 	     re-run-import-rows action rather than the prior weak-match-confirm. -->
 	{#if flashLlmSkipped}
@@ -235,10 +253,17 @@
 					{@const giftCandidates = data.giftCandidates[r.id] ?? []}
 					{@const items = data.rowItems[r.id] ?? []}
 					{@const isMultiItem = items.length > 1}
+					{@const allExcluded = isMultiItem
+						? items.every((_, idx) => data.excludedItemKeys[`${r.id}:${idx}`])
+						: !!data.excludedRowTitles[r.id]}
 					{@const singleItemMatch =
 						!isMultiItem ? llmVerdict?.matches.find((m) => m.itemIndex === 0) ?? null : null}
 					{@const sibs = data.existingSiblings[r.id]}
-					{@const expectedItemCount = isMultiItem ? items.length : 1}
+					{@const expectedItemCount = isMultiItem
+							? items.filter((_, idx) => !data.excludedItemKeys[`${r.id}:${idx}`]).length
+							: data.excludedRowTitles[r.id]
+								? 0
+								: 1}
 					{@const willAdvance = (sibs?.count ?? 0) > 0}
 					{@const acceptLabel = willAdvance
 						? `Accept → advance ${sibs.count} existing gift${sibs.count === 1 ? '' : 's'}`
@@ -259,7 +284,49 @@
 						</div>
 
 						{#if !isMultiItem && r.parsed_title}
-							<p class="parsed"><span class="label">Item</span> {r.parsed_title}</p>
+							<p class="parsed">
+								<span class="label">Item</span> {r.parsed_title}
+								{#if !data.excludedRowTitles[r.id]}
+									<button
+										type="button"
+										class="exclude-link"
+										onclick={() => (excludePanelKey = `single:${r.id}`)}
+									>
+										Exclude…
+									</button>
+								{/if}
+							</p>
+							{#if data.excludedRowTitles[r.id]}
+								<p class="excluded-note">
+									Excluded by keyword “{data.excludedRowTitles[r.id]}” — won't be imported.
+								</p>
+							{:else if excludePanelKey === `single:${r.id}`}
+								<div class="exclude-panel">
+									<label class="lbl" for="exkw_single_{r.id}">Exclude keyword</label>
+									<input
+										id="exkw_single_{r.id}"
+										type="text"
+										name="keyword"
+										value={r.parsed_title}
+										autocomplete="off"
+									/>
+									<select name="match_type" aria-label="Match type">
+										<option value="contains" selected>contains</option>
+										<option value="exact">exact</option>
+									</select>
+									<div class="exclude-actions">
+										<button type="submit" formaction="?/excludeItem" class="primary small">
+											Save exclusion
+										</button>
+										<button type="button" class="ghost small" onclick={() => (excludePanelKey = null)}>
+											Cancel
+										</button>
+									</div>
+									<p class="exclude-hint">
+										Trim to the recurring core so future orders still match (e.g. “Tide PODS”).
+									</p>
+								</div>
+							{/if}
 						{/if}
 						{#if r.parsed_tracking_number || r.parsed_carrier}
 							<p class="parsed">
@@ -314,11 +381,48 @@
 										{@const lineCands = data.lineItemCandidates[`${r.id}:${idx}`] ?? []}
 										{@const lineLlmMatch =
 											llmVerdict?.matches.find((m) => m.itemIndex === idx) ?? null}
+										{@const exKey = `${r.id}:${idx}`}
+										{@const isExcluded = !!data.excludedItemKeys[exKey]}
 										<li class="line-li">
 											<div class="line-head">
-												<p class="line-title">{it.title}</p>
+												<p class="line-title" class:dim={isExcluded}>{it.title}</p>
 												<p class="line-price">{priceDollarsOrEmpty(it.priceCents ?? null)}</p>
 											</div>
+											{#if isExcluded}
+												<p class="excluded-note">
+													Excluded by keyword “{data.excludedItemKeys[exKey]}” — won't be imported.
+												</p>
+											{:else if excludePanelKey === exKey}
+												<div class="exclude-panel">
+													<label class="lbl" for="exkw_{r.id}_{idx}">Exclude keyword</label>
+													<input
+														id="exkw_{r.id}_{idx}"
+														type="text"
+														name="keyword"
+														value={it.title}
+														autocomplete="off"
+													/>
+													<select name="match_type" aria-label="Match type">
+														<option value="contains" selected>contains</option>
+														<option value="exact">exact</option>
+													</select>
+													<div class="exclude-actions">
+														<button type="submit" formaction="?/excludeItem" class="primary small">
+															Save exclusion
+														</button>
+														<button
+															type="button"
+															class="ghost small"
+															onclick={() => (excludePanelKey = null)}
+														>
+															Cancel
+														</button>
+													</div>
+													<p class="exclude-hint">
+														Trim to the recurring core so future orders still match (e.g. “Tide PODS”).
+													</p>
+												</div>
+											{:else}
 											<label class="line-pick">
 												<span class="lbl">Recipient</span>
 												<PersonPicker
@@ -376,6 +480,14 @@
 													{/each}
 												</fieldset>
 											{/if}
+												<button
+													type="button"
+													class="exclude-link"
+													onclick={() => (excludePanelKey = exKey)}
+												>
+													Exclude this item…
+												</button>
+											{/if}
 										</li>
 									{/each}
 								</ul>
@@ -388,9 +500,10 @@
 									type="radio"
 									name="disposition_{r.id}"
 									value="accept"
-									checked={r.email_type === 'order_placed' ||
-										r.email_type === 'shipped' ||
-										r.email_type === 'delivered'}
+									checked={!allExcluded &&
+										(r.email_type === 'order_placed' ||
+											r.email_type === 'shipped' ||
+											r.email_type === 'delivered')}
 								/>
 								<span>{acceptLabel}</span>
 							</label>
@@ -399,7 +512,8 @@
 									type="radio"
 									name="disposition_{r.id}"
 									value="skip"
-									checked={r.email_type === 'marketing' ||
+									checked={allExcluded ||
+										r.email_type === 'marketing' ||
 										r.email_type === 'review_request' ||
 										r.email_type === 'unknown'}
 								/>
@@ -1190,6 +1304,81 @@
 		min-height: 36px;
 		padding: 6px 14px;
 		font-size: 13px;
+	}
+	.primary.small {
+		min-height: 36px;
+		padding: 6px 14px;
+		font-size: 13px;
+	}
+
+	/* td-8360f4: per-item exclusion controls */
+	.exclude-link {
+		background: none;
+		border: none;
+		padding: 4px 0;
+		margin-top: 4px;
+		font-family: var(--font-sans);
+		font-size: 13px;
+		color: var(--muted);
+		text-decoration: underline;
+		cursor: pointer;
+		min-height: 32px;
+	}
+	.exclude-link:hover {
+		color: var(--rose);
+	}
+	.exclude-panel {
+		margin-top: 8px;
+		padding: 12px;
+		background: var(--bg);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.exclude-panel input[type='text'] {
+		min-height: var(--tap-target);
+		padding: 10px 12px;
+		font-family: var(--font-sans);
+		font-size: 16px;
+		background: var(--paper);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		color: var(--ink);
+	}
+	.exclude-panel select {
+		min-height: var(--tap-target);
+		padding: 8px 10px;
+		font-family: var(--font-sans);
+		font-size: 15px;
+		background: var(--paper);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		color: var(--ink);
+		align-self: flex-start;
+	}
+	.exclude-actions {
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	.exclude-hint {
+		font-family: var(--font-sans);
+		font-size: 12px;
+		color: var(--muted);
+		margin: 0;
+	}
+	.excluded-note {
+		margin-top: 6px;
+		font-family: var(--font-sans);
+		font-size: 13px;
+		font-style: italic;
+		color: var(--muted);
+	}
+	.line-title.dim {
+		color: var(--muted);
+		text-decoration: line-through;
 	}
 
 	.handled-list {

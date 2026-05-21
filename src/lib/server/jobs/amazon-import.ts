@@ -21,6 +21,7 @@ import {
 	upsertShipment
 } from '../orders';
 import { rankCandidatesForImport, rankCandidatesForItems } from '../gift-matcher';
+import { getActiveExclusionKeywords, matchExcluded } from '../exclusion-keywords';
 import { llmMatchImportRow } from '../llm-matcher';
 import { planShipmentAdvanceForRow, type ShipmentAdvancePlan } from '../shipment-decider';
 import type { ParsedAmazonItem } from '../amazon-parser';
@@ -48,6 +49,7 @@ export interface ScanResult {
 	newRows: number;
 	existingRows: number;
 	autoMoved: number;
+	excludedItems: number;
 }
 
 function setRunStatus(
@@ -105,6 +107,10 @@ export async function runAmazonScan(
 		async () => {
 			const run = createRun(userId);
 			const db = getDb();
+			// td-8360f4: active exclusion keywords, fetched once. Used to drop
+			// recurring non-gift items from each parsed email before the LLM
+			// call + insert (per-item: surviving items still stage normally).
+			const exclusions = getActiveExclusionKeywords();
 			const existingIdStmt = db.prepare<
 				[string],
 				{ id: number }
@@ -164,6 +170,7 @@ export async function runAmazonScan(
 			const FETCH_CONCURRENCY = 10;
 			let llmCalls = 0;
 			let llmErrors = 0;
+			let excludedItems = 0;
 			for (let offset = 0; offset < fresh.length; offset += FETCH_CONCURRENCY) {
 				const batch = fresh.slice(offset, offset + FETCH_CONCURRENCY);
 				const fetchResults = await Promise.allSettled(
@@ -178,6 +185,7 @@ export async function runAmazonScan(
 					bodyExcerpt: string | null;
 					recipientHit: ReturnType<typeof matchRecipient>;
 					disposition: ImportRowDisposition;
+					excludedNote: string | null;
 				};
 				const staged: Array<StagedParse | null> = batch.map((s, i) => {
 					const res = fetchResults[i];
@@ -187,20 +195,56 @@ export async function runAmazonScan(
 					}
 					const parse = parseAmazonEmail(res.value);
 					parsed += 1;
+					const baseDisposition = defaultDisposition(parse.emailType);
+					// td-8360f4: per-item exclusion. Only order-lifecycle emails
+					// (baseDisposition='pending') are evaluated — marketing/review are
+					// already skipped. We deliberately do NOT drop excluded items from
+					// parse.items here: dropping re-indexes survivors and can collapse a
+					// multi-item order to a single-item row, after which the commit path
+					// would mis-use the order total (parsed_price_cents) as the lone
+					// survivor's price and lose its line-item handling (Codex P1). Items
+					// are kept intact; the review page hides excluded ones via load-time
+					// flagging (matchExcluded), preserving each survivor's
+					// line_item_index and per-line price. The only scan-time decision is:
+					// if EVERY item is excluded, skip the whole email.
+					let excludedNote: string | null = null;
+					if (baseDisposition === 'pending' && exclusions.length > 0) {
+						const titles =
+							parse.items.length > 0
+								? parse.items.map((it) => it.title)
+								: parse.title
+									? [parse.title]
+									: [];
+						if (titles.length > 0) {
+							let matched = 0;
+							let firstHit: ReturnType<typeof matchExcluded> = null;
+							for (const t of titles) {
+								const hit = matchExcluded(t, exclusions);
+								if (hit) {
+									matched += 1;
+									if (!firstHit) firstHit = hit;
+								}
+							}
+							excludedItems += matched;
+							if (matched === titles.length && firstHit) {
+								excludedNote = `Auto-excluded: matched keyword "${firstHit.keyword}"`;
+							}
+						}
+					}
 					// Wave 1 follow-up: persist a body excerpt (≤4000 chars) so the
 					// LLM matcher has fallback context when the structured items[]
 					// extractor missed everything. Only useful for pending dispositions
-					// — auto-skipped marketing rows never call the LLM.
+					// — auto-skipped/excluded rows never call the LLM.
 					const bodyExcerpt =
-						parse.items.length === 0 && res.value.bodyText
+						!excludedNote && parse.items.length === 0 && res.value.bodyText
 							? res.value.bodyText.slice(0, 4000)
 							: null;
 					const recipientMatch = matchRecipient(parse.recipientName);
 					const match = recipientMatch.personId
 						? recipientMatch
 						: applyOrderIdFallback(recipientMatch, parse.orderId);
-					const disposition = defaultDisposition(parse.emailType);
-					return { summary: s, parse, bodyExcerpt, recipientHit: match, disposition };
+					const disposition: ImportRowDisposition = excludedNote ? 'skipped' : baseDisposition;
+					return { summary: s, parse, bodyExcerpt, recipientHit: match, disposition, excludedNote };
 				});
 
 				// Phase 2: LLM verdict per pending row, dispatched in parallel.
@@ -217,7 +261,7 @@ export async function runAmazonScan(
 				for (let i = 0; i < batch.length; i++) {
 					const st = staged[i];
 					if (!st) continue;
-					const { summary: s, parse, bodyExcerpt, recipientHit: match, disposition } = st;
+					const { summary: s, parse, bodyExcerpt, recipientHit: match, disposition, excludedNote } = st;
 					const candidatesJson = JSON.stringify(match.candidates);
 					const itemsJson = parse.items.length > 0 ? JSON.stringify(parse.items) : null;
 					let llmVerdictJson: string | null = null;
@@ -254,6 +298,11 @@ export async function runAmazonScan(
 						disposition,
 						llmVerdictJson
 					);
+					if (excludedNote) {
+						db.prepare(
+							'UPDATE import_rows SET error_message = ? WHERE source_message_id = ?'
+						).run(excludedNote, s.id);
+					}
 					newRows += 1;
 					if (disposition !== 'pending') idsToMove.push(s.id);
 				}
@@ -298,7 +347,7 @@ export async function runAmazonScan(
 				entityType: 'import',
 				entityId: run.id,
 				action: 'amazon_scan',
-				summary: `Scanned ${summaries.length} messages; staged ${newRows} new (${existing} already staged)${autoMoved > 0 ? `; moved ${autoMoved} auto-skipped to processed` : ''}`
+				summary: `Scanned ${summaries.length} messages; staged ${newRows} new (${existing} already staged)${autoMoved > 0 ? `; moved ${autoMoved} auto-skipped to processed` : ''}${excludedItems > 0 ? `; excluded ${excludedItems} item(s) via keywords` : ''}`
 			});
 
 			return {
@@ -307,12 +356,13 @@ export async function runAmazonScan(
 				parsed,
 				newRows,
 				existingRows: existing,
-				autoMoved
+				autoMoved,
+				excludedItems
 			};
 		},
 		{
 			summarize: (r) =>
-				`run ${r.runId} — fetched ${r.fetched}, ${r.newRows} new rows, ${r.existingRows} already staged${r.autoMoved > 0 ? `, ${r.autoMoved} auto-moved` : ''}`
+				`run ${r.runId} — fetched ${r.fetched}, ${r.newRows} new rows, ${r.existingRows} already staged${r.autoMoved > 0 ? `, ${r.autoMoved} auto-moved` : ''}${r.excludedItems > 0 ? `, ${r.excludedItems} excluded` : ''}`
 		}
 	);
 }

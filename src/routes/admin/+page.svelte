@@ -211,6 +211,7 @@
 			<a href="/admin/occasions" class="quick-btn">Occasions</a>
 			<a href="/admin/vendors" class="quick-btn">Vendors</a>
 			<a href="/admin/shippers" class="quick-btn">Shippers</a>
+			<a href="/admin/exclusion-keywords" class="quick-btn">Exclusions</a>
 			<a href="/admin/imports" class="quick-btn">Imports</a>
 			<a href="/admin/settings" class="quick-btn">Settings</a>
 			<a href="/admin/system" class="quick-btn">System &amp; jobs</a>

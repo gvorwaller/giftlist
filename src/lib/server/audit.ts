@@ -10,7 +10,8 @@ export type AuditEntityType =
 	| 'import'
 	| 'vendor'
 	| 'shipper'
-	| 'tracking';
+	| 'tracking'
+	| 'exclusion_keyword';
 
 export interface AuditInput {
 	actorUserId: number;

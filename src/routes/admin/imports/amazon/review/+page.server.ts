@@ -12,6 +12,11 @@ import {
 } from '$server/jobs/amazon-import';
 import type { LlmMatchVerdict, MatcherCandidate } from '$server/llm-matcher';
 import { rankCandidatesForImport } from '$server/gift-matcher';
+import {
+	createExclusionKeyword,
+	getActiveExclusionKeywords,
+	matchExcluded
+} from '$server/exclusion-keywords';
 import { getDb } from '$server/db';
 import { getOrderByOrderId, listGiftsForOrder } from '$server/orders';
 import { canTransition, transitionGift } from '$server/gift-status';
@@ -137,6 +142,12 @@ export const load: PageServerLoad = ({ locals, url }) => {
 	if (!run) throw error(404, 'No import runs yet. Run a scan first.');
 
 	const rows = listRowsForRun(run.id);
+	// td-8360f4: active exclusion keywords. We don't drop excluded items from
+	// rowItems (that would shift line_item_index); instead we flag them so the
+	// UI suppresses their picker and shows a muted "excluded" note. Catches
+	// rows staged before a keyword was added (e.g. just after the admin clicks
+	// "Exclude" on an item, or adds one in the CRUD panel).
+	const exclusions = getActiveExclusionKeywords();
 	// Include self-people scoped to the current admin so they can assign an
 	// imported Amazon row to "Gaylon — me" (private package). Per-user
 	// scoping (td-68804e) — admin sees their own self-row only, never the
@@ -188,6 +199,11 @@ export const load: PageServerLoad = ({ locals, url }) => {
 	// resolve panel instead of making the admin hunt through gift pages.
 	const heldSiblings: Record<number, HeldSibling[]> = {};
 	const heldTargets: Record<number, string> = {};
+	// td-8360f4: `${rowId}:${itemIndex}` → matched keyword, for multi-item rows;
+	// `rowId` → matched keyword for single-item rows (no items[] array). The UI
+	// renders these as a muted "Excluded by keyword" line instead of a picker.
+	const excludedItemKeys: Record<string, string> = {};
+	const excludedRowTitles: Record<number, string> = {};
 	const personNameStmt = getDb().prepare<[number], { display_name: string }>(
 		`SELECT display_name FROM people WHERE id = ?`
 	);
@@ -211,15 +227,29 @@ export const load: PageServerLoad = ({ locals, url }) => {
 		if (r.disposition === 'pending') {
 			const verdict = parseLlmVerdict(r.llm_verdict_json);
 			llmVerdicts[r.id] = verdict;
+			// td-8360f4: flag items/rows matching an active exclusion keyword.
+			// Flagged entries get a muted "excluded" line in the UI instead of a
+			// picker, and we skip candidate ranking for them.
+			if (exclusions.length > 0) {
+				if (items.length > 1) {
+					items.forEach((it, idx) => {
+						const hit = matchExcluded(it.title, exclusions);
+						if (hit) excludedItemKeys[`${r.id}:${idx}`] = hit.keyword;
+					});
+				} else {
+					const hit = matchExcluded(r.parsed_title, exclusions);
+					if (hit) excludedRowTitles[r.id] = hit.keyword;
+				}
+			}
 			// Top-5 candidates for the radio UI. Recipient hint matters less
 			// here than at LLM-input time (heuristic still surfaces the right
 			// gifts), so pass null.
-			if (r.parsed_title) {
+			if (r.parsed_title && !excludedRowTitles[r.id]) {
 				giftCandidates[r.id] = rankCandidatesForImport(r.parsed_title, null, 5);
 			}
 			if (items.length > 1) {
 				items.forEach((it, idx) => {
-					if (it.title) {
+					if (it.title && !excludedItemKeys[`${r.id}:${idx}`]) {
 						lineItemCandidates[`${r.id}:${idx}`] = rankCandidatesForImport(
 							it.title,
 							null,
@@ -240,6 +270,9 @@ export const load: PageServerLoad = ({ locals, url }) => {
 				for (const m of verdict.matches) {
 					if (m.giftId == null) continue;
 					const isMulti = items.length > 1;
+					// Don't splice a candidate for an excluded item/row.
+					if (isMulti && excludedItemKeys[`${r.id}:${m.itemIndex}`]) continue;
+					if (!isMulti && excludedRowTitles[r.id]) continue;
 					const targetKey = isMulti ? `${r.id}:${m.itemIndex}` : null;
 					const list = isMulti
 						? (lineItemCandidates[targetKey!] ??= [])
@@ -270,7 +303,9 @@ export const load: PageServerLoad = ({ locals, url }) => {
 		lineItemCandidates,
 		existingSiblings,
 		heldSiblings,
-		heldTargets
+		heldTargets,
+		excludedItemKeys,
+		excludedRowTitles
 	};
 };
 
@@ -493,6 +528,34 @@ export const actions: Actions = {
 		const qs = new URLSearchParams();
 		qs.set('run', String(runId));
 		qs.set('resolved_held', String(advanced));
+		throw redirect(303, `/admin/imports/amazon/review?${qs.toString()}`);
+	},
+
+	// td-8360f4: add an Amazon item to the exclusion list straight from the
+	// review page. The admin clicks "Exclude" on a line item, trims the
+	// pre-filled title down to its recurring core, and saves. We only create
+	// the keyword here — the load filter (above) hides the now-excluded item
+	// on the redirect render and on every other pending row, so no row
+	// mutation is needed.
+	excludeItem: async ({ locals, request }) => {
+		if (!locals.user) throw redirect(303, '/login');
+		const fd = await request.formData();
+		const runId = Number(fd.get('run_id'));
+		if (!Number.isFinite(runId)) return fail(400, { error: 'Missing run id.' });
+		const keyword = String(fd.get('keyword') ?? '').trim();
+		const matchType = String(fd.get('match_type') ?? 'contains');
+		if (!keyword) return fail(400, { error: 'Keyword is required.' });
+		try {
+			createExclusionKeyword(keyword, matchType, null, locals.user.id);
+		} catch (err) {
+			const qs = new URLSearchParams();
+			qs.set('run', String(runId));
+			qs.set('exclude_error', err instanceof Error ? err.message : 'Could not add keyword.');
+			throw redirect(303, `/admin/imports/amazon/review?${qs.toString()}`);
+		}
+		const qs = new URLSearchParams();
+		qs.set('run', String(runId));
+		qs.set('excluded_kw', keyword);
 		throw redirect(303, `/admin/imports/amazon/review?${qs.toString()}`);
 	}
 };
