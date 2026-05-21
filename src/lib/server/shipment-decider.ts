@@ -1,6 +1,7 @@
 import { listGiftsForOrder, matchSiblingsToShipment } from './orders';
 import { siblingsAsCandidates } from './gift-matcher';
 import { llmMatchShipment } from './llm-matcher';
+import { listRecentCorrections } from './matcher-corrections';
 import type { Gift, ImportRow } from './types';
 import type { ParsedAmazonItem } from './amazon-parser';
 
@@ -102,7 +103,7 @@ export async function planShipmentAdvance(
 		})),
 		shipmentBodyFallback: row.parsed_body_excerpt,
 		siblings: candidates,
-		corrections: []
+		corrections: listRecentCorrections(5) // Phase 5: few-shot from admin corrections
 	});
 
 	if (!verdict) {

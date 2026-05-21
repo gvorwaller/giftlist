@@ -7,7 +7,7 @@ import {
 	detectOverride,
 	invalidateCacheKey,
 	sweepExpiredCache,
-	type OverrideDecisionInput
+	type CommittedItem
 } from './matcher-feedback';
 import type { ImportRow } from './types';
 
@@ -38,66 +38,73 @@ function row(json: string | null): ImportRow {
 	return { id: 1, llm_verdict_json: json } as unknown as ImportRow;
 }
 
-function decide(d: OverrideDecisionInput): OverrideDecisionInput {
-	return d;
+/** Build committed items. `created` defaults false (linked existing gift). */
+function committed(
+	rows: { itemIndex: number; giftId: number; created?: boolean }[]
+): CommittedItem[] {
+	return rows.map((r) => ({ itemIndex: r.itemIndex, giftId: r.giftId, created: r.created ?? false }));
 }
 
-describe('detectOverride (pure)', () => {
-	it('agree — single item, admin linked the LLM pick', () => {
-		const ev = detectOverride(row(verdictJson([{ itemIndex: 0, giftId: 7 }])), decide({ assignedGiftId: 7 }));
+describe('detectOverride (pure, off effective committed gifts)', () => {
+	it('agree — committed the gift the LLM picked', () => {
+		const ev = detectOverride(row(verdictJson([{ itemIndex: 0, giftId: 7 }])), committed([{ itemIndex: 0, giftId: 7 }]));
 		expect(ev?.action).toBe('agree');
 		expect(ev?.items).toEqual([]);
 	});
 
-	it('agree — both chose create-new (LLM null, admin no link)', () => {
-		const ev = detectOverride(row(verdictJson([{ itemIndex: 0, giftId: null }])), decide({}));
+	it('agree — created new and the LLM also said no match', () => {
+		const ev = detectOverride(
+			row(verdictJson([{ itemIndex: 0, giftId: null }])),
+			committed([{ itemIndex: 0, giftId: 100, created: true }])
+		);
 		expect(ev?.action).toBe('agree');
 	});
 
-	it('override — admin linked a different existing gift', () => {
-		const ev = detectOverride(row(verdictJson([{ itemIndex: 0, giftId: 7 }])), decide({ assignedGiftId: 9 }));
+	it('override — committed a different existing gift than the LLM picked', () => {
+		const ev = detectOverride(row(verdictJson([{ itemIndex: 0, giftId: 7 }])), committed([{ itemIndex: 0, giftId: 9 }]));
 		expect(ev?.action).toBe('override');
 		expect(ev?.items).toEqual([{ itemIndex: 0, llmGiftId: 7, adminGiftId: 9 }]);
 	});
 
-	it('reject — LLM picked an existing gift, admin created new', () => {
-		const ev = detectOverride(row(verdictJson([{ itemIndex: 0, giftId: 7 }])), decide({}));
+	it('reject — LLM picked an existing gift, the row created a new one', () => {
+		const ev = detectOverride(
+			row(verdictJson([{ itemIndex: 0, giftId: 7 }])),
+			committed([{ itemIndex: 0, giftId: 100, created: true }])
+		);
 		expect(ev?.action).toBe('reject');
 		expect(ev?.items).toEqual([{ itemIndex: 0, llmGiftId: 7, adminGiftId: null }]);
 	});
 
-	it('fill-in — LLM saw no match, admin linked one', () => {
-		const ev = detectOverride(row(verdictJson([{ itemIndex: 0, giftId: null }])), decide({ assignedGiftId: 5 }));
+	it('fill-in — LLM saw no match, the row linked an existing gift (incl. dedup-link)', () => {
+		const ev = detectOverride(
+			row(verdictJson([{ itemIndex: 0, giftId: null }])),
+			committed([{ itemIndex: 0, giftId: 5 }])
+		);
 		expect(ev?.action).toBe('fill-in');
+		expect(ev?.items).toEqual([{ itemIndex: 0, llmGiftId: null, adminGiftId: 5 }]);
 	});
 
 	it('multi-item — one item disagrees → override, only that delta reported', () => {
 		const ev = detectOverride(
 			row(verdictJson([{ itemIndex: 0, giftId: 1 }, { itemIndex: 1, giftId: 2 }])),
-			decide({
-				lineItems: [
-					{ lineItemIndex: 0, assignedGiftId: 1 },
-					{ lineItemIndex: 1, assignedGiftId: 3 }
-				]
-			})
+			committed([{ itemIndex: 0, giftId: 1 }, { itemIndex: 1, giftId: 3 }])
 		);
 		expect(ev?.action).toBe('override');
 		expect(ev?.items).toEqual([{ itemIndex: 1, llmGiftId: 2, adminGiftId: 3 }]);
 	});
 
-	it('excluded item (not committed) is skipped, not treated as a disagreement', () => {
-		// Verdict has matches for items 0 and 1, but the admin only committed
-		// item 0 (item 1 was excluded by keyword → no picker → not in lineItems).
+	it('excluded item (never committed) is skipped, not a disagreement', () => {
+		// Verdict has matches for items 0 and 1, but only item 0 was committed
+		// (item 1 was excluded by keyword → no picker → not in committed[]).
 		const ev = detectOverride(
 			row(verdictJson([{ itemIndex: 0, giftId: 1 }, { itemIndex: 1, giftId: 2 }])),
-			decide({ lineItems: [{ lineItemIndex: 0, assignedGiftId: 1 }] })
+			committed([{ itemIndex: 0, giftId: 1 }])
 		);
 		expect(ev?.action).toBe('agree');
 		expect(ev?.items).toEqual([]);
 	});
 
-	it('treats an item the LLM left in unmatched_items as a fill-in when the admin links it (Codex P2)', () => {
-		// LLM placed no match for item 0 — it only appears in unmatched_items.
+	it('fill-in for an item the LLM left only in unmatched_items (Codex P2)', () => {
 		const json = JSON.stringify({
 			matches: [],
 			unmatched_items: [0],
@@ -108,20 +115,20 @@ describe('detectOverride (pure)', () => {
 			created_at: '',
 			cache_key: 'k9'
 		});
-		const ev = detectOverride(row(json), decide({ assignedGiftId: 5 }));
+		const ev = detectOverride(row(json), committed([{ itemIndex: 0, giftId: 5 }]));
 		expect(ev?.action).toBe('fill-in');
 		expect(ev?.items).toEqual([{ itemIndex: 0, llmGiftId: null, adminGiftId: 5 }]);
 		expect(ev?.cacheKey).toBe('k9');
 	});
 
 	it('returns null when the row has no verdict', () => {
-		expect(detectOverride(row(null), decide({ assignedGiftId: 1 }))).toBeNull();
+		expect(detectOverride(row(null), committed([{ itemIndex: 0, giftId: 1 }]))).toBeNull();
 	});
 
 	it('cacheKey is threaded through, null when the verdict lacks one', () => {
-		const withKey = detectOverride(row(verdictJson([{ itemIndex: 0, giftId: 7 }], 'abc123')), decide({ assignedGiftId: 9 }));
+		const withKey = detectOverride(row(verdictJson([{ itemIndex: 0, giftId: 7 }], 'abc123')), committed([{ itemIndex: 0, giftId: 9 }]));
 		expect(withKey?.cacheKey).toBe('abc123');
-		const without = detectOverride(row(verdictJson([{ itemIndex: 0, giftId: 7 }])), decide({ assignedGiftId: 9 }));
+		const without = detectOverride(row(verdictJson([{ itemIndex: 0, giftId: 7 }])), committed([{ itemIndex: 0, giftId: 9 }]));
 		expect(without?.cacheKey).toBeNull();
 	});
 });

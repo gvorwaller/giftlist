@@ -9,7 +9,8 @@ import {
 import { parseAmazonEmail, type ParsedAmazonEmail } from '../amazon-parser';
 import { matchRecipient, saveAlias } from '../name-matcher';
 import { logAudit } from '../audit';
-import { isPersonVisibleToUser } from '../people';
+import { isPersonVisibleToUser, getPersonById } from '../people';
+import { appendCorrection, listRecentCorrections } from '../matcher-corrections';
 import { createGift, getGiftById, updateGift } from '../gifts';
 import { ensureVendor } from '../vendors';
 import { transitionGift, canTransition } from './../gift-status';
@@ -23,7 +24,7 @@ import {
 import { rankCandidatesForImport, rankCandidatesForItems } from '../gift-matcher';
 import { getActiveExclusionKeywords, matchExcluded } from '../exclusion-keywords';
 import { llmMatchImportRow, type LlmMatchVerdict } from '../llm-matcher';
-import { detectOverride, invalidateCacheKey, sweepExpiredCache } from '../matcher-feedback';
+import { detectOverride, invalidateCacheKey, sweepExpiredCache, type CommittedItem } from '../matcher-feedback';
 import { getBoolFlag } from '../app-state';
 import { planShipmentAdvanceForRow, type ShipmentAdvancePlan } from '../shipment-decider';
 import type { ParsedAmazonItem } from '../amazon-parser';
@@ -483,7 +484,7 @@ async function buildAndCallMatcher(
 		})),
 		bodyFallback: bodyExcerpt,
 		candidates,
-		corrections: [] // Wave 2 feature
+		corrections: listRecentCorrections(5) // Phase 5: few-shot from admin corrections
 	});
 	if (!verdict) return null;
 	return JSON.stringify(verdict);
@@ -529,7 +530,7 @@ async function buildAndCallMatcherFromRow(row: ImportRow): Promise<string | null
 		})),
 		bodyFallback: row.parsed_body_excerpt,
 		candidates,
-		corrections: []
+		corrections: listRecentCorrections(5) // Phase 5: few-shot from admin corrections
 	});
 	if (!verdict) return null;
 	return JSON.stringify(verdict);
@@ -772,10 +773,8 @@ export async function commitReviewedRows(
 						evt.abstainReason,
 						row.id
 					);
-					// Phase 4 (4c): admin's commit disagreed with the LLM → drop the
-					// stale cache entry so the wrong verdict stops replaying for 7 days.
-					const ov = detectOverride(row, d);
-					if (ov && ov.action !== 'agree') invalidateCacheKey(ov.cacheKey);
+					// Phase 4/5: invalidate stale cache + record correction on override.
+					applyOverrideFeedback(row, ids.committed);
 					messagesToMove.push(row.source_message_id);
 					continue;
 				} catch (err) {
@@ -823,9 +822,14 @@ export async function commitReviewedRows(
 			}
 
 			try {
+				// Track whether THIS row created a new gift vs linked an existing
+				// one (incl. resolveOrCreateGift's order_id dedup). Drives Phase
+				// 4/5 feedback off the effective committed gift (Codex P2).
+				let createdThisRow = false;
 				if (giftId == null) {
 					const resolved = resolveOrCreateGift(row, personId, userId);
 					giftId = resolved.id;
+					createdThisRow = resolved.created;
 					if (resolved.created) result.giftsCreated += 1;
 					else result.giftsLinked += 1;
 				}
@@ -846,10 +850,8 @@ export async function commitReviewedRows(
 					evt.abstainReason,
 					row.id
 				);
-				// Phase 4 (4c): admin's commit disagreed with the LLM → drop the
-				// stale cache entry so the wrong verdict stops replaying for 7 days.
-				const ov = detectOverride(row, d);
-				if (ov && ov.action !== 'agree') invalidateCacheKey(ov.cacheKey);
+				// Phase 4/5: invalidate stale cache + record correction on override.
+				applyOverrideFeedback(row, [{ itemIndex: 0, giftId, created: createdThisRow }]);
 				messagesToMove.push(row.source_message_id);
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
@@ -879,6 +881,39 @@ export async function commitReviewedRows(
 	}
 
 	return result;
+}
+
+/**
+ * Shared override-feedback hook (Phase 4 + Phase 5). After a successful
+ * commit, compare the admin's choice to the LLM verdict and, on any
+ * disagreement: (4c) invalidate the stale cache entry, and (5b) append a
+ * few-shot correction for items where the admin linked a concrete existing
+ * gift. Pure create-new "reject" items are not captured (no positive example
+ * to learn from) but still invalidate the cache.
+ */
+function applyOverrideFeedback(row: ImportRow, committed: CommittedItem[]): void {
+	const ov = detectOverride(row, committed);
+	if (!ov || ov.action === 'agree') return;
+	invalidateCacheKey(ov.cacheKey);
+	const items = parseRowItems(row);
+	for (const it of ov.items) {
+		if (it.adminGiftId == null) continue; // create-new (reject) — no positive few-shot
+		const gift = getGiftById(it.adminGiftId);
+		if (!gift) continue;
+		const person = getPersonById(gift.person_id);
+		// Per-item source title so a multi-item correction teaches the right
+		// mapping (Codex P2); fall back to the row title for single-item rows.
+		const sourceTitle = items[it.itemIndex]?.title ?? row.parsed_title ?? row.subject ?? null;
+		appendCorrection({
+			sourceEmailTitle: sourceTitle,
+			sourceEmailSubject: row.subject ?? null,
+			chosenGiftId: gift.id,
+			chosenGiftTitle: gift.title,
+			chosenPersonId: gift.person_id,
+			chosenPersonName: person?.display_name ?? `#${gift.person_id}`,
+			action: it.llmGiftId == null ? 'fill-in' : 'override'
+		});
+	}
 }
 
 export const AUTO_ACCEPT_FLAG = 'amazon_auto_accept_enabled';
@@ -1126,6 +1161,10 @@ export interface MultiItemAcceptResult {
 	/** Concatenation in line-item order — kept for callers that want the
 	 * canonical "first gift" id without caring about created-vs-linked. */
 	allIds: number[];
+	/** Per-email-item committed gift (Phase 5 override feedback): itemIndex =
+	 * the line item's index in this email, giftId = what it linked/created,
+	 * created = brand-new vs deduped to an existing sibling. */
+	committed: CommittedItem[];
 }
 
 function commitMultiItemAccept(
@@ -1180,6 +1219,7 @@ function commitMultiItemAccept(
 		const createdIds: number[] = [];
 		const linkedIds: number[] = [];
 		const allIds: number[] = [];
+		const committed: CommittedItem[] = [];
 
 		for (const li of lineItems) {
 			// Allow holes: a lineItem with no items[lineItemIndex] uses
@@ -1318,6 +1358,7 @@ function commitMultiItemAccept(
 				consumedSiblingIds.add(dedupTarget.id);
 				linkedIds.push(dedupTarget.id);
 				allIds.push(dedupTarget.id);
+				committed.push({ itemIndex: li.lineItemIndex, giftId: dedupTarget.id, created: false });
 				continue;
 			}
 
@@ -1349,8 +1390,9 @@ function commitMultiItemAccept(
 			);
 			createdIds.push(gift.id);
 			allIds.push(gift.id);
+			committed.push({ itemIndex: li.lineItemIndex, giftId: gift.id, created: true });
 		}
-		return { createdIds, linkedIds, allIds };
+		return { createdIds, linkedIds, allIds, committed };
 	})();
 }
 

@@ -38,11 +38,19 @@ export interface OverrideEvent {
 	items: OverrideItemDelta[];
 }
 
-/** Minimal shape detectOverride reads — CommitRowInput is assignable to it,
- *  so callers pass their decision directly without a circular import. */
-export interface OverrideDecisionInput {
-	assignedGiftId?: number;
-	lineItems?: Array<{ lineItemIndex: number; assignedGiftId?: number }>;
+/**
+ * What a row ACTUALLY committed, per email item index — built from the commit
+ * result, not the submitted form. `created` = a brand-new gift (treated as "no
+ * existing match" for comparison); otherwise giftId is the existing gift the
+ * row linked to. Driving feedback off this (rather than the form's
+ * assignedGiftId) catches dedup-links the admin didn't explicitly pick — e.g.
+ * resolveOrCreateGift reusing a gift by order_id, or commitMultiItemAccept
+ * fingerprint-deduping to a sibling (Codex P2).
+ */
+export interface CommittedItem {
+	itemIndex: number;
+	giftId: number;
+	created: boolean;
 }
 
 function parseVerdict(json: string | null): LlmMatchVerdict | null {
@@ -80,36 +88,26 @@ function classify(llmGiftId: number | null, adminGiftId: number | null): Overrid
  */
 export function detectOverride(
 	row: ImportRow,
-	decision: OverrideDecisionInput
+	committed: CommittedItem[]
 ): OverrideEvent | null {
 	const verdict = parseVerdict(row.llm_verdict_json);
 	if (!verdict) return null;
 
-	// Admin's chosen gift per item index. Multi-item rows key by
-	// lineItemIndex; single-item rows are item 0. null = "create new".
-	const adminByIndex = new Map<number, number | null>();
-	if (decision.lineItems && decision.lineItems.length > 0) {
-		for (const li of decision.lineItems) {
-			adminByIndex.set(li.lineItemIndex, li.assignedGiftId ?? null);
-		}
-	} else {
-		adminByIndex.set(0, decision.assignedGiftId ?? null);
-	}
-
-	// Walk the items the admin actually COMMITTED (excluded items have no
-	// picker, so they never appear here and aren't disagreements). The LLM's
-	// pick for each is its matches[] entry if present, else null — which
-	// covers items the model surfaced only via `unmatched_items`, or omitted
-	// entirely (Codex P2). That way an admin filling in a gift the LLM
-	// couldn't place still counts as a correction and invalidates the cache.
+	// Compare each COMMITTED item to the LLM's pick. The LLM's pick is its
+	// matches[] entry if present, else null — which covers items surfaced only
+	// via `unmatched_items` or omitted entirely. A newly-created gift counts as
+	// "no existing match" (effective pick null), so create-new agrees with an
+	// LLM "no match" and disagrees with an LLM existing-gift pick. Excluded
+	// items are never committed, so they never appear here.
 	const matchByIndex = new Map(verdict.matches.map((m) => [m.itemIndex, m.giftId]));
 	const items: OverrideItemDelta[] = [];
 	let action: OverrideAction = 'agree';
-	for (const [itemIndex, adminGiftId] of adminByIndex) {
-		const llmGiftId = matchByIndex.get(itemIndex) ?? null;
-		const itemAction = classify(llmGiftId, adminGiftId);
+	for (const c of committed) {
+		const llmGiftId = matchByIndex.get(c.itemIndex) ?? null;
+		const effectivePick = c.created ? null : c.giftId;
+		const itemAction = classify(llmGiftId, effectivePick);
 		if (itemAction !== 'agree') {
-			items.push({ itemIndex, llmGiftId, adminGiftId });
+			items.push({ itemIndex: c.itemIndex, llmGiftId, adminGiftId: effectivePick });
 			action = strongest(action, itemAction);
 		}
 	}
