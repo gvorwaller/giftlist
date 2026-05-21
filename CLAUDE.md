@@ -18,7 +18,7 @@ Mobile-first gift tracking web app with two roles: a gift manager (primary user)
 
 **Accessibility is a core design constraint, not a nice-to-have.** See design spec Section 11 for detailed guidelines.
 
-The original 6-phase plan in `docs/gift-tracker-implementation-plan-Codex.md` is largely shipped (phases 1-6 complete; ongoing work tracked in `td` and `docs/devlog/YYYY-MM-DD.md`). Schema currently at **v26**.
+The original 6-phase plan in `docs/gift-tracker-implementation-plan-Codex.md` is largely shipped (phases 1-6 complete; ongoing work tracked in `td` and `docs/devlog/YYYY-MM-DD.md`). Schema currently at **v28**.
 
 ## Commands
 
@@ -70,7 +70,7 @@ cc-status --lines 20                         # last 20 entries
 ### Data Layer
 SQLite (WAL, single-writer). Migrations live in `migrations/NNN-name.sql` and run at boot via `src/lib/server/migrate.ts`. The runner toggles `PRAGMA foreign_keys = OFF` before each migration's transaction and runs `PRAGMA foreign_key_check` after commit, so migrations needing the SQLite recreate-table pattern (e.g. 014, 015) are safe.
 
-Current schema (v26) — tables grouped by domain:
+Current schema (v28) — tables grouped by domain:
 
 - **Identity**: `users`, `sessions`, `external_tokens` (encrypted Google OAuth)
 - **Recipients**: `people` (with `is_self` + `owner_user_id` for per-user privacy on personal packages), `person_aliases`
@@ -79,8 +79,9 @@ Current schema (v26) — tables grouped by domain:
 - **Orders**: `orders` (1:N over `gifts`, td-3e9ae2), `order_shipments` (N:1 under `orders` for partial shipments, td-d08902)
 - **Drafts / history**: `drafts`, `recently_viewed`
 - **Imports**: `import_runs` (`source` ∈ {`amazon_email`, `tracking_email`}), `import_rows` (`email_type` includes `tracking_only`, `order_confirmation`; `disposition` includes `review` td-3d1ee6; **Wave 1: `llm_verdict_json` column (mig 023) + `parsed_body_excerpt` column (mig 026)**)
-- **Matcher**: **`matcher_llm_cache` rebuilt by mig 024** — versioned key `sha1(mode + model + prompt_version + …)` + `expires_at` TTL (7 days). Holds Opus 4.7 verdicts under `mode IN ('import', 'shipment')`.
-- **Ops**: `audit_log`, `job_runs`, `app_state` (Wave 1 stores `wave1_migration_025_archived_gifts` forensic JSON when mig 025 auto-archives prod duplicate clusters)
+- **Exclusions**: `exclusion_keywords` (**mig 027, td-8360f4**) — admin-managed Amazon-item filter; `match_type` ∈ {`contains`, `exact`}, soft-delete via `is_archived`
+- **Matcher**: **`matcher_llm_cache` rebuilt by mig 024** — versioned key `sha1(mode + model + prompt_version + …)` + `expires_at` TTL (7 days). Holds Opus 4.7 verdicts under `mode IN ('import', 'shipment')`. **Wave 2: `cache_key` now travels on the verdict JSON so the commit path can invalidate on admin override; swept weekly + a `/admin/system` Clear button.** `matcher_corrections` (**mig 028, td-4bfb59**) — admin override/fill-in corrections fed back as few-shot; natural-key unique index upserts repeats
+- **Ops**: `audit_log`, `job_runs`, `app_state` (Wave 1 stores `wave1_migration_025_archived_gifts` forensic JSON; **Wave 2 stores the `amazon_auto_accept_enabled` toggle, default OFF**)
 
 ### Route Structure
 ```
@@ -97,13 +98,14 @@ Current schema (v26) — tables grouped by domain:
 /admin/people, /admin/people/[id], /new      — recipient CRUD + self-person + owner picker
 /admin/occasions                             — shared/custom occasion CRUD
 /admin/vendors, /admin/shippers              — lookup CRUD (with archive)
+/admin/exclusion-keywords                    — Amazon item exclusion keywords CRUD (td-8360f4)
 /admin/imports                               — landing page (Google Contacts + Amazon + Tracking tiles)
 /admin/imports/contacts                      — Google Contacts import (birthday-filtered)
 /admin/imports/amazon, /amazon/review        — Amazon email scan + commit review
 /admin/imports/tracking, /tracking/review    — non-Amazon shipment-email scan + commit review (td-61017c)
 /admin/settings                              — Google OAuth + notification + backup config
 /admin/audit                                 — paginated audit log with source-aware import links
-/admin/system                                — backup status, job history, manual triggers
+/admin/system                                — backup status, job history, manual triggers, Clear-LLM-cache + auto-accept toggle (Wave 2), archived-gifts browser
 
 /api/tracking/shippo                         — Shippo webhook (URL-token auth)
 /healthz                                     — liveness + schema_version
@@ -123,6 +125,9 @@ Route policy: manager cannot reach `/admin/*` (enforced by `src/routes/admin/+la
 - **Shippo registration mutex**: `tracking.ts` keeps a per-process `Map<giftId, Promise>` so concurrent calls (admin double-click, importer racing manual refresh) share one POST instead of double-billing $0.01.
 - **Amazon LLM matcher (Wave 1)**: `gift-matcher.ts` ranks open gifts into a top-20 shortlist (recipient-hint priority); `llm-matcher.ts` calls Opus 4.7 via tool_use to produce a structured `LlmMatchVerdict` `{matches[], unmatched_items[], confidence, safe_to_apply, summary}`; verdicts persist on `import_rows.llm_verdict_json` so the review page renders synchronously. `shipment-decider.ts` owns the safety policy: heuristic-certain → advance matched siblings; LLM-uncertain or items absent → abstain (create the shipment row, hold sibling status, surface in admin UI). Cache key is versioned with mode/model/prompt_version/candidate-ids/person-ids/items-fingerprint/recipient-hint/body-hash so different contexts can't replay each other's verdicts.
 - **Amazon commit dedup (Wave 1 Phase 3)**: `commitMultiItemAccept` matches by content fingerprint (title-only) first, line_item_index second (fallback only when fingerprints don't match). Recipient mismatch on a matched sibling FAILS the row with an explicit error instead of silently overriding. DB partial unique index on active `(order_pk, line_item_index)` is the belt-and-suspenders.
+- **Exclusion keywords (td-8360f4)**: `exclusion-keywords.ts` holds the CRUD + pure `matchExcluded(title, keywords)`. Applied at TWO points — scan time (`runAmazonScan` drops excluded items; a fully-excluded email stages `skipped`) and review-load (flags items so the UI suppresses their picker, keeping `line_item_index` stable). The commit path needs no change: a suppressed item has no `lineperson_<row>_<idx>` field, so it never becomes a gift. Per-item "Exclude this item…" trim panel on the review page creates the keyword inline.
+- **Matcher feedback spine (Wave 2 — Phase 4/5 + auto-accept)**: `matcher-feedback.ts` `detectOverride(row, committed)` is ONE signal — "did the admin's committed gift differ from the LLM's pick?" — with three consumers. It's driven off the **effective committed gift** (`CommittedItem{itemIndex, giftId, created}` from the commit result, NOT the form), so dedup-links the admin never explicitly picked still register. `applyOverrideFeedback` runs at both commit success paths and, on a non-`agree` action: (Phase 4) `invalidateCacheKey(verdict.cache_key)`, and (Phase 5) `appendCorrection` for items linking an existing gift. `listRecentCorrections(5)` feeds the already-wired few-shot slot in all three prompt builders.
+- **Auto-accept (td-dbaa0c, Wave 2 — LINK-ONLY)**: `buildAutoAcceptDecisions` qualifies a row only when *every* non-excluded item is a `high`-confidence match to an existing, non-archived gift (never auto-creates; shipment status advances still governed by the shipment-decider abstain). Manual "Commit all high-confidence" button (`?/commitHighConfidence`) ships now; automatic-in-scan (`autoAcceptHighConfidenceRows` at the end of `runAmazonScan`) sits behind the `AUTO_ACCEPT_FLAG` app_state toggle, **default OFF** — opt in via `/admin/system` after the button earns trust. Every auto-accept is audit-logged (`amazon_auto_accept`).
 
 ## CSS Rules
 

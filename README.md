@@ -33,6 +33,9 @@ Accessibility is a core constraint, not a polish item — Lighthouse 100/100/100
   - **Amazon**: `Giftlist/Amazon/Inbox` → parses Amazon order/shipped/delivered emails → recipient match → gift create/advance. Multi-recipient orders model partial shipments via `order_shipments` so only the boxed-up siblings advance status per shipping notification.
   - **Tracking**: `Giftlist/Tracking/Inbox` → parses non-Amazon shipment confirmations (UPS / USPS / FedEx / DHL / OnTrac / Lasership / Canada Post) → either links to existing gift, routes ambiguous order# matches to a manual review queue, or creates a self-package with Shippo registration
 - **Match-quality safety net** — heuristic shortlist + Opus 4.7 ranker with confidence-tiered verdicts (`high` / `medium` / `low`); admin sees AI badges + the model's reasoning inline. Shipment-decider abstains rather than guess on ambiguous shipped/delivered events. Commit-time dedup uses content fingerprints (title-only) with line_item_index as fallback, refuses to silently override a recipient mismatch, and is backed by a partial unique index on active `(order_pk, line_item_index)`
+- **Exclusion keywords** (td-8360f4) — recurring non-gift Amazon items (household supplies, subscriptions) are filtered per line item by an admin-managed keyword list (`contains` / `exact`, soft-delete + restore at `/admin/exclusion-keywords`). Excluded items are dropped at scan time and hidden on the review page; a per-item "Exclude this item…" button trims the title to a recurring core in one step
+- **Auto-accept** (td-dbaa0c, Wave 2) — a link-only gate auto-commits rows where *every* item is a `high`-confidence match to an existing gift (never auto-creates). Manual "Commit all high-confidence" button on the review page; an automatic-in-scan mode sits behind an admin toggle on `/admin/system` (**default OFF**). The goal: turn the daily review from "look at everything" into "glance at the few it wasn't sure about"
+- **Learns from corrections** (td-4bfb59, Wave 2) — when an admin commits a gift the LLM didn't pick, the correction is logged (`matcher_corrections`) and the last 5 are fed back into the Opus prompt as few-shot examples. The same override signal (`detectOverride`) also invalidates the now-stale cache entry (Phase 4); a weekly sweep + a `/admin/system` "Clear LLM cache" button round out cache maintenance
 - **Searchable recipient picker** — type-to-filter combobox on every "for who?" field (gift forms + Amazon review per-line-item pickers)
 - Personal (non-gift) packages — `is_self` people scoped per-owner so manager and admin only see their own
 - Soft-delete with reachable Restore button + visible archived gifts under "Past gifts" history per person, plus `/admin/system/archived` for cross-person browsing with chronological sort
@@ -98,13 +101,18 @@ CCC pre-flight runs this before uploading the directory to the NAS.
 
 | Concern | File |
 |---|---|
-| Schema | `migrations/*.sql` (currently at **v26**) |
+| Schema | `migrations/*.sql` (currently at **v28**) |
 | Migration runner (FK choreography) | `src/lib/server/migrate.ts` |
 | Type definitions | `src/lib/server/types.ts` |
 | Auth | `src/lib/server/{auth,session}.ts` |
 | Job orchestration | `src/lib/server/jobs/{runner,reminders,amazon-import,tracking-import,tracking-refresh,christmas-kickoff,backup}.ts` |
 | Email parsers | `src/lib/server/{amazon-parser,shipment-parser}.ts` |
 | Gift / line-item matcher (Wave 1) | `src/lib/server/{gift-matcher,llm-matcher,shipment-decider}.ts` (heuristic shortlist ranker + Opus 4.7 verdict + shipment abstain policy) |
+| Matcher feedback spine (Wave 2) | `src/lib/server/matcher-feedback.ts` (`detectOverride` — admin-commit-vs-LLM signal driving cache invalidation + correction logging + auto-accept gating) |
+| Corrections few-shot (Wave 2) | `src/lib/server/matcher-corrections.ts` (`appendCorrection` upsert + `listRecentCorrections`), table `matcher_corrections` (mig 028) |
+| Amazon exclusion keywords | `src/lib/server/exclusion-keywords.ts` (CRUD + pure `matchExcluded`), `/admin/exclusion-keywords`, table `exclusion_keywords` (mig 027) |
+| Auto-accept gate + scan hook | `src/lib/server/jobs/amazon-import.ts` (`buildAutoAcceptDecisions`, `autoAcceptHighConfidenceRows`, `AUTO_ACCEPT_FLAG`) |
+| App config flags (K/V) | `src/lib/server/app-state.ts` (`getBoolFlag`/`setBoolFlag` over the `app_state` table — backs the auto-accept toggle) |
 | Order / shipment helpers | `src/lib/server/orders.ts` (`upsertOrderByOrderId`, `upsertShipment`, `matchSiblingsToShipment`) |
 | DB test harness (Wave 1) | `src/lib/server/test-harness.ts` (tempfile SQLite + factories used by fixture corpus in `src/lib/server/jobs/amazon-import-fixtures.test.ts`) |
 | Tracking provider integration | `src/lib/server/tracking.ts` (+ webhook at `/api/tracking/shippo`) |
@@ -142,6 +150,6 @@ When docs disagree, the higher-numbered version wins.
   - `tracking_email.scan` — `35 7 * * *` (07:35, between Amazon scan and tracking refresh)
   - `tracking.refresh` — `45 7 * * *` (07:45 — pulls Shippo status for in-flight gifts)
   - `reminders.daily` — `0 8 * * *` (08:00)
-  - `amazon.cleanup_processed` — `15 3 * * 0` (03:15 Sundays — trash messages older than 180 days)
+  - `amazon.cleanup_processed` — `15 3 * * 0` (03:15 Sundays — trash messages older than 180 days; also sweeps expired LLM matcher cache rows)
   - `tracking_email.cleanup_processed` — `25 3 * * 0` (03:25 Sundays)
   - `christmas.kickoff` — `0 8 1 9 *` (Sept 1 — gift-shopping kickoff)
