@@ -45,19 +45,6 @@ export const FAILED_LABEL = 'Giftlist/Amazon/Failed';
 export const SCAN_JOB = 'amazon.scan';
 export const PROCESSED_RETENTION_DAYS = 180;
 
-/**
- * td-2b5c81: the canonical "open this order on Amazon" link, stored in
- * gifts.source_url for Amazon-imported gifts so the edit form's Source URL
- * field is populated. (The shipment "Track package" deep-link lives separately
- * in amazon_tracking_url and surfaces on the gift detail page.) Order IDs are
- * digits/hyphens, so encodeURIComponent is effectively a no-op — it just
- * hardens against a malformed parse. Mirrors the URL the 029 backfill writes.
- */
-export function amazonOrderUrl(orderId: string | null | undefined): string | null {
-	if (!orderId) return null;
-	return `https://www.amazon.com/gp/css/order-details?orderID=${encodeURIComponent(orderId)}`;
-}
-
 export interface ScanResult {
 	runId: number;
 	fetched: number;
@@ -1087,7 +1074,6 @@ function resolveOrCreateGift(
 			person_id: personId,
 			title: row.parsed_title ?? row.subject ?? '(imported)',
 			vendor_id: amazonVendor.id,
-			source_url: amazonOrderUrl(row.parsed_order_id),
 			occasion_id: null,
 			occasion_year: new Date().getFullYear(),
 			order_id: row.parsed_order_id,
@@ -1387,7 +1373,6 @@ function commitMultiItemAccept(
 					person_id: li.assignedPersonId,
 					title,
 					vendor_id: amazonVendor.id,
-					source_url: amazonOrderUrl(row.parsed_order_id),
 					occasion_id: null,
 					occasion_year: new Date().getFullYear(),
 					order_id: row.parsed_order_id,
