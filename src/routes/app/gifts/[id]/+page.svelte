@@ -165,6 +165,14 @@
 		{:else if data.gift.price_cents}
 			<p class="sub">{priceDollars(data.gift.price_cents)}</p>
 		{/if}
+		{#if data.gift.source_url}
+			<a
+				href={data.gift.source_url}
+				target="_blank"
+				rel="noopener noreferrer"
+				class="source-open"
+			>Open link ↗</a>
+		{/if}
 	</section>
 
 	{#if form?.error}
@@ -475,6 +483,22 @@
 		font-family: var(--font-sans);
 		font-size: 15px;
 		color: var(--muted);
+	}
+
+	.hero .source-open {
+		display: inline-flex;
+		align-items: center;
+		margin-top: 14px;
+		min-height: var(--tap-target);
+		padding: 10px 16px;
+		background: var(--green-soft);
+		color: var(--green);
+		border: 1px solid var(--green);
+		border-radius: var(--radius-control);
+		font-family: var(--font-sans);
+		font-size: 15px;
+		font-weight: 600;
+		text-decoration: none;
 	}
 
 	.body {
