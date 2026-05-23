@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { giftFingerprint } from './amazon-import';
+import { amazonOrderUrl, giftFingerprint } from './amazon-import';
 
 describe('giftFingerprint — Wave 1 Phase 3', () => {
 	it('is case-insensitive', () => {
@@ -34,5 +34,25 @@ describe('giftFingerprint — Wave 1 Phase 3', () => {
 		const a = giftFingerprint('Endoscope Camera Kit');
 		const b = giftFingerprint('Endoscope Camera Kit');
 		expect(a).toBe(b);
+	});
+});
+
+describe('amazonOrderUrl — td-2b5c81', () => {
+	it('builds the order-details link from a standard order id', () => {
+		expect(amazonOrderUrl('123-4567890-1234567')).toBe(
+			'https://www.amazon.com/gp/css/order-details?orderID=123-4567890-1234567'
+		);
+	});
+
+	it('returns null for null/undefined/empty order ids', () => {
+		expect(amazonOrderUrl(null)).toBeNull();
+		expect(amazonOrderUrl(undefined)).toBeNull();
+		expect(amazonOrderUrl('')).toBeNull();
+	});
+
+	it('url-encodes a malformed order id so the link stays well-formed', () => {
+		expect(amazonOrderUrl('a b&c')).toBe(
+			'https://www.amazon.com/gp/css/order-details?orderID=a%20b%26c'
+		);
 	});
 });
