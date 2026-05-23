@@ -139,7 +139,7 @@
 			{#if sourceUrl && !editingSourceUrl}
 				<div class="source-url-view">
 					<a
-						href={sourceUrl}
+						href="/app/gifts/{data.gift.id}/open-source"
 						target="_blank"
 						rel="noopener noreferrer"
 						class="source-open"
