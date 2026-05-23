@@ -47,6 +47,12 @@
 	let notes = $state(initial.notes);
 	let submitting = $state(false);
 
+	// Source URL is usually auto-filled by the Amazon/Tracking importer and
+	// rarely hand-edited, so default to a one-tap "Open link" affordance when a
+	// value exists. Raw URL text in the input is useless on mobile (copy/paste
+	// only); the Edit toggle reveals the input for the manual-entry case.
+	let editingSourceUrl = $state(false);
+
 	const personChanged = $derived(personId !== originalPersonId);
 
 	// When user picks a different person, the loaded occasion options no
@@ -128,17 +134,34 @@
 			{/if}
 		</label>
 
-		<label>
-			<span>Source URL</span>
-			<input
-				name="source_url"
-				type="text"
-				inputmode="url"
-				autocomplete="off"
-				bind:value={sourceUrl}
-				placeholder="https://…"
-			/>
-		</label>
+		<div class="field">
+			<span class="field-label">Source URL</span>
+			{#if sourceUrl && !editingSourceUrl}
+				<div class="source-url-view">
+					<a
+						href={sourceUrl}
+						target="_blank"
+						rel="noopener noreferrer"
+						class="source-open"
+					>Open link ↗</a>
+					<button
+						type="button"
+						class="source-edit"
+						onclick={() => (editingSourceUrl = true)}
+					>Edit</button>
+				</div>
+				<input type="hidden" name="source_url" value={sourceUrl} />
+			{:else}
+				<input
+					name="source_url"
+					type="text"
+					inputmode="url"
+					autocomplete="off"
+					bind:value={sourceUrl}
+					placeholder="https://…"
+				/>
+			{/if}
+		</div>
 
 		{#if personChanged}
 			<input type="hidden" name="occasion_id" value="" />
@@ -322,6 +345,53 @@
 		font-size: 13px;
 		font-weight: 400;
 		color: var(--muted);
+	}
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.field-label {
+		font-family: var(--font-sans);
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--ink);
+	}
+
+	.source-url-view {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+
+	.source-open {
+		display: inline-flex;
+		align-items: center;
+		min-height: var(--tap-target);
+		padding: 12px 18px;
+		background: var(--green-soft);
+		color: var(--green);
+		border: 1px solid var(--green);
+		border-radius: var(--radius-control);
+		font-family: var(--font-sans);
+		font-size: 16px;
+		font-weight: 600;
+		text-decoration: none;
+	}
+
+	.source-edit {
+		min-height: var(--tap-target);
+		padding: 12px 16px;
+		background: transparent;
+		color: var(--muted);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-control);
+		font-family: var(--font-sans);
+		font-size: 15px;
+		font-weight: 600;
+		cursor: pointer;
 	}
 
 	.reassign-note {
