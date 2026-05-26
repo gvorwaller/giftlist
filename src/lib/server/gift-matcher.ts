@@ -80,7 +80,7 @@ const OPEN_GIFTS_QUERY = `
 	LEFT JOIN occasions o ON o.id = g.occasion_id
 	WHERE g.is_archived = 0
 	  AND g.order_id IS NULL
-	  AND g.status IN ('idea', 'planned')
+	  AND g.status NOT IN ('given', 'returned')
 `;
 
 /**
@@ -231,7 +231,7 @@ export function siblingsAsCandidates(orderPk: number): MatcherCandidate[] {
 	const rows = db
 		.prepare<[number], RawCandidate>(
 			`${OPEN_GIFTS_QUERY.replace(
-				"WHERE g.is_archived = 0\n\t  AND g.order_id IS NULL\n\t  AND g.status IN ('idea', 'planned')",
+				"WHERE g.is_archived = 0\n\t  AND g.order_id IS NULL\n\t  AND g.status NOT IN ('given', 'returned')",
 				'WHERE g.is_archived = 0 AND g.order_pk = ?'
 			)}`
 		)
