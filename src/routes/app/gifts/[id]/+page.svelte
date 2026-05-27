@@ -301,6 +301,9 @@
 		<h2>{isArchived ? 'Restore' : 'Archive'}</h2>
 		{#if isArchived}
 			<p>Bring this gift back into the main list.</p>
+			{#if form?.error}
+				<p class="error" role="alert">{form.error}</p>
+			{/if}
 			<form method="POST" action="?/unarchive">
 				<button type="submit" class="primary-btn">Restore this gift</button>
 			</form>
