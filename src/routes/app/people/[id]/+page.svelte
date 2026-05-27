@@ -152,7 +152,7 @@
 								<p class="gift-title">{g.title}</p>
 								<p class="gift-meta">
 									{#if g.occasion_title}
-										{g.occasion_title}{#if g.occasion_year} {g.occasion_year}{/if}
+										{g.occasion_title}{#if g.occasion_year}{` ${g.occasion_year}`}{/if}
 									{/if}
 									{#if g.occasion_title && g.price_cents}
 										·

@@ -153,7 +153,7 @@
 				<a href="/app/people/{data.gift.person.id}">{data.gift.person.display_name}</a>
 			{/if}
 			{#if data.gift.occasion}
-				· {data.gift.occasion.title}{#if data.gift.occasion_year} {data.gift.occasion_year}{/if}
+				· {data.gift.occasion.title}{#if data.gift.occasion_year}{` ${data.gift.occasion_year}`}{/if}
 			{/if}
 		</p>
 		{#if data.gift.vendor || data.gift.source}
@@ -181,14 +181,13 @@
 			<form method="POST" action={formAction(next)} class="primary-action">
 				<button type="submit" class="primary-btn">{nextLabel}</button>
 			</form>
-		{:else}
-			<p class="done">
-				{#if data.gift.status === 'given'}
-					All done — this one is given.
-				{:else if data.gift.status === 'returned'}
-					Returned.
-				{/if}
-			</p>
+		{:else if data.gift.status === 'given'}
+			<p class="done">All done — this one is given.</p>
+		{:else if data.gift.status === 'returned'}
+			<p class="done">Returned.</p>
+			<form method="POST" action="?/undoReturn" class="secondary-action">
+				<button type="submit" class="ghost">Undo Return</button>
+			</form>
 		{/if}
 
 		{#if returnable}

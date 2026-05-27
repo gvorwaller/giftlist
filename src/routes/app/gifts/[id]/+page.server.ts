@@ -1,7 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { archiveGift, getGiftWithContext } from '$server/gifts';
-import { transitionGift, canTransition } from '$server/gift-status';
+import { transitionGift, canTransition, undoReturnGift } from '$server/gift-status';
 import { recordView } from '$server/recently-viewed';
 import {
 	isTrackingProviderConfigured,
@@ -96,7 +96,25 @@ export const actions: Actions = {
 	unarchive: ({ params, locals }) => {
 		if (!locals.user) throw redirect(303, '/login');
 		const gift = requireGift(params, locals.user.id);
-		archiveGift(gift.id, false, locals.user.id);
+		try {
+			archiveGift(gift.id, false, locals.user.id);
+		} catch (err) {
+			if (err instanceof Error && err.message.includes('UNIQUE constraint failed')) {
+				return fail(409, {
+					error: `Can't restore "${gift.title}" — another gift from the same order already occupies its slot. Archive or delete the duplicate first.`
+				});
+			}
+			throw err;
+		}
+		throw redirect(303, `/app/gifts/${gift.id}`);
+	},
+	undoReturn: ({ params, locals }) => {
+		if (!locals.user) throw redirect(303, '/login');
+		const gift = requireGift(params, locals.user.id);
+		if (gift.status !== 'returned') {
+			return fail(409, { error: `This gift is not returned.` });
+		}
+		undoReturnGift(gift.id, locals.user.id);
 		throw redirect(303, `/app/gifts/${gift.id}`);
 	},
 

@@ -2,6 +2,7 @@ import { getDb } from './db';
 import { logAudit } from './audit';
 import {
 	canTransition,
+	managerLabel,
 	nextForwardStatus,
 	transitionSummary
 } from '$lib/gift-status';
@@ -63,6 +64,44 @@ export function transitionGift(
 			entityId: giftId,
 			action: `status_${to}`,
 			summary: transitionSummary(current.status, to, current.title)
+		});
+	})();
+
+	return db.prepare<[number], Gift>('SELECT * FROM gifts WHERE id = ?').get(giftId)!;
+}
+
+/**
+ * Reverse an accidental "Mark Returned". Restores the gift to the
+ * most-advanced status its timestamps support (delivered > shipped >
+ * ordered > planned).
+ */
+export function undoReturnGift(giftId: number, actorUserId: number): Gift {
+	const db = getDb();
+	const current = db.prepare<[number], Gift>('SELECT * FROM gifts WHERE id = ?').get(giftId);
+	if (!current) throw new Error(`Gift ${giftId} not found`);
+	if (current.status !== 'returned') {
+		throw new Error(`Gift ${giftId} is not returned (status: ${current.status})`);
+	}
+
+	const restoreTo: GiftStatus = current.delivered_at
+		? 'delivered'
+		: current.shipped_at
+			? 'shipped'
+			: current.ordered_at
+				? 'ordered'
+				: 'planned';
+
+	db.transaction(() => {
+		db.prepare('UPDATE gifts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+			restoreTo,
+			giftId
+		);
+		logAudit({
+			actorUserId,
+			entityType: 'gift',
+			entityId: giftId,
+			action: `status_${restoreTo}`,
+			summary: `"${current.title}" → ${managerLabel(restoreTo)} (undo return)`
 		});
 	})();
 
