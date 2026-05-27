@@ -20,7 +20,7 @@ export const load: PageServerLoad = ({ locals }) => {
 			`SELECT g.* FROM gifts g
 			   JOIN people p ON p.id = g.person_id
 			  WHERE g.is_archived = 0
-			    AND g.status IN ('ordered', 'shipped', 'delivered', 'wrapped')
+			    AND g.status IN ('ordered', 'shipped', 'delivered', 'wrapped', 'returned')
 			    AND (p.is_self = 0 OR p.owner_user_id = ?)
 			  ORDER BY COALESCE(g.shipped_at, g.created_at) DESC`
 		)
@@ -37,10 +37,12 @@ export const load: PageServerLoad = ({ locals }) => {
 	const waitingToGive = enriched.filter(
 		(g) => g.status === 'delivered' || g.status === 'wrapped'
 	);
+	const returned = enriched.filter((g) => g.status === 'returned');
 
 	return {
 		onTheWay,
 		waitingToGive,
+		returned,
 		trackingProviderConfigured: isTrackingProviderConfigured()
 	};
 };

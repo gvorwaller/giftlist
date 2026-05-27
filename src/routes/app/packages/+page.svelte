@@ -11,7 +11,7 @@
 
 	type PackageRow = (typeof data.onTheWay)[number];
 
-	let totalCount = $derived(data.onTheWay.length + data.waitingToGive.length);
+	let totalCount = $derived(data.onTheWay.length + data.waitingToGive.length + data.returned.length);
 
 	function trackingLabel(g: PackageRow): string | null {
 		if (!g.tracking_number && !g.carrier) return null;
@@ -128,6 +128,46 @@
 									{/if}
 								</div>
 								<span class="pill green">{managerLabel(g.status)}</span>
+							</a>
+							<a
+								href="/app/gifts/{g.id}/edit"
+								class="row-edit"
+								aria-label="Edit {g.title}"
+							>
+								<svg
+									width="20"
+									height="20"
+									viewBox="0 0 20 20"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="1.6"
+									aria-hidden="true"
+								>
+									<path
+										d="M14 2.5l3.5 3.5-9.5 9.5H4.5v-3.5l9.5-9.5z"
+										stroke-linejoin="round"
+										stroke-linecap="round"
+									/>
+								</svg>
+							</a>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
+
+		{#if data.returned.length > 0}
+			<section class="section">
+				<h2 class="section-heading">Returned</h2>
+				<ul class="list">
+					{#each data.returned as g (g.id)}
+						<li class="row-card">
+							<a href="/app/gifts/{g.id}" class="row-main">
+								<div class="row-text">
+									<p class="title">{g.title}</p>
+									<p class="meta">For {g.person_display_name}</p>
+								</div>
+								<span class="pill danger">{managerLabel(g.status)}</span>
 							</a>
 							<a
 								href="/app/gifts/{g.id}/edit"
@@ -372,6 +412,11 @@
 	.pill.green {
 		background: var(--green-soft);
 		color: var(--green);
+	}
+
+	.pill.danger {
+		background: #fdf0ef;
+		color: var(--rose);
 	}
 
 	.row-edit {
