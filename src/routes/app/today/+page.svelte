@@ -63,6 +63,8 @@
 		});
 	}
 
+	let confirmingSkipPoId = $state<number | null>(null);
+
 	const hasAnything = $derived(
 		Boolean(
 			data.nextBestAction ||
@@ -117,11 +119,16 @@
 			<div class="row">
 				<a href="/app/gifts/new?person={a.personId}" class="primary">Add a gift for {a.personDisplayName}</a>
 				<a href="/app/people/{a.personId}" class="ghost">See {a.personDisplayName}</a>
-				<form method="POST" action="?/skip" class="skip-form">
-					<input type="hidden" name="person_occasion_id" value={a.personOccasionId} />
-					<input type="hidden" name="occasion_year" value={a.occasionYear} />
-					<button type="submit" class="ghost danger">Skip {a.occasionYear}</button>
-				</form>
+				{#if confirmingSkipPoId === a.personOccasionId}
+					<form method="POST" action="?/skip" class="skip-confirm">
+						<input type="hidden" name="person_occasion_id" value={a.personOccasionId} />
+						<input type="hidden" name="occasion_year" value={a.occasionYear} />
+						<button type="button" class="ghost" onclick={() => { confirmingSkipPoId = null; }}>Cancel</button>
+						<button type="submit" class="danger-btn">Yes, skip {a.occasionYear}</button>
+					</form>
+				{:else}
+					<button type="button" class="ghost danger" onclick={() => { confirmingSkipPoId = a.personOccasionId; }}>Skip {a.occasionYear}</button>
+				{/if}
 			</div>
 		</section>
 	{/if}
@@ -151,11 +158,16 @@
 								<span class="pill {statusTone(o.bestGiftStatus)}">{managerLabel(o.bestGiftStatus)}</span>
 							{/if}
 						</a>
-						<form method="POST" action="?/skip" class="skip-form-inline">
-							<input type="hidden" name="person_occasion_id" value={o.personOccasionId} />
-							<input type="hidden" name="occasion_year" value={o.occasionYear} />
-							<button type="submit" class="link-skip" title="Skip this year">Skip</button>
-						</form>
+						{#if confirmingSkipPoId === o.personOccasionId}
+							<form method="POST" action="?/skip" class="skip-confirm-inline">
+								<input type="hidden" name="person_occasion_id" value={o.personOccasionId} />
+								<input type="hidden" name="occasion_year" value={o.occasionYear} />
+								<button type="button" class="link-skip" onclick={() => { confirmingSkipPoId = null; }}>Cancel</button>
+								<button type="submit" class="link-skip danger-text">Yes, skip</button>
+							</form>
+						{:else}
+							<button type="button" class="link-skip" title="Skip this year" onclick={() => { confirmingSkipPoId = o.personOccasionId; }}>Skip</button>
+						{/if}
 					</li>
 				{/each}
 			</ul>
@@ -462,13 +474,28 @@
 		padding: 4px 8px;
 	}
 
-	.skip-form {
+	.skip-confirm {
+		display: flex;
+		gap: 8px;
 		margin: 0;
 	}
 
 	.ghost.danger {
 		color: var(--rose);
 		border-color: var(--rose);
+	}
+
+	.danger-btn {
+		background: var(--rose);
+		color: #fff;
+		border: 1px solid var(--rose);
+		border-radius: var(--radius-control);
+		font-family: var(--font-sans);
+		font-size: 14px;
+		font-weight: 600;
+		padding: 8px 16px;
+		min-height: 44px;
+		cursor: pointer;
 	}
 
 	.occ-li {
@@ -481,8 +508,15 @@
 		flex: 1 1 auto;
 	}
 
-	.skip-form-inline {
+	.skip-confirm-inline {
 		flex: 0 0 auto;
+		display: flex;
+		gap: 4px;
+	}
+
+	.link-skip.danger-text {
+		color: var(--rose);
+		border-color: var(--rose);
 	}
 
 	.link-skip {
