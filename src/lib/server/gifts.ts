@@ -317,9 +317,10 @@ export function archiveGift(id: number, archived: boolean, actorUserId: number):
 		`UPDATE gifts
 		    SET is_archived = ?,
 		        archived_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
+		        line_item_index = CASE WHEN ? = 0 THEN NULL ELSE line_item_index END,
 		        updated_at = CURRENT_TIMESTAMP
 		  WHERE id = ?`
-	).run(archived ? 1 : 0, archived ? 1 : 0, id);
+	).run(archived ? 1 : 0, archived ? 1 : 0, archived ? 1 : 0, id);
 	const after = getGiftById(id)!;
 	logAudit({
 		actorUserId,

@@ -96,16 +96,7 @@ export const actions: Actions = {
 	unarchive: ({ params, locals }) => {
 		if (!locals.user) throw redirect(303, '/login');
 		const gift = requireGift(params, locals.user.id);
-		try {
-			archiveGift(gift.id, false, locals.user.id);
-		} catch (err) {
-			if (err instanceof Error && err.message.includes('UNIQUE constraint failed')) {
-				return fail(409, {
-					error: `Can't restore "${gift.title}" — another gift from the same order already occupies its slot. Archive or delete the duplicate first.`
-				});
-			}
-			throw err;
-		}
+		archiveGift(gift.id, false, locals.user.id);
 		throw redirect(303, `/app/gifts/${gift.id}`);
 	},
 	undoReturn: ({ params, locals }) => {
