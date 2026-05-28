@@ -287,9 +287,23 @@ export function nextOccurrenceDate(occasion: Occasion, today: Date = new Date())
 /**
  * Today's calendar date anchored at noon UTC — same calendar date in any US
  * timezone after JSON serialization. td-68e82a.
+ *
+ * td-85b243: derive "today" from America/New_York, not the server's local
+ * clock. The DO droplet runs in UTC, so after 8 PM EDT (midnight UTC) the
+ * server's getDate() is already tomorrow — making daysUntil one too few.
  */
+const easternParts = new Intl.DateTimeFormat('en-US', {
+	timeZone: 'America/New_York',
+	year: 'numeric',
+	month: 'numeric',
+	day: 'numeric'
+});
 export function todayMidnightUTC(today: Date = new Date()): Date {
-	return new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 12));
+	const parts = easternParts.formatToParts(today);
+	const y = Number(parts.find((p) => p.type === 'year')!.value);
+	const m = Number(parts.find((p) => p.type === 'month')!.value);
+	const d = Number(parts.find((p) => p.type === 'day')!.value);
+	return new Date(Date.UTC(y, m - 1, d, 12));
 }
 
 /** Human-friendly formatter for a Date in the local calendar. */
