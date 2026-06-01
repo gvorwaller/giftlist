@@ -175,11 +175,12 @@ function annotateGiftState(occasions: UpcomingOccasion[]): void {
 		WHEN 'idea' THEN 8
 		ELSE 9
 	END`;
-	const exactStmt = db.prepare<[number, number], { status: GiftStatus }>(
+	const exactStmt = db.prepare<[number, number, number], { status: GiftStatus }>(
 		`SELECT status FROM gifts
 		  WHERE is_archived = 0
 		    AND person_id = ?
 		    AND occasion_id = ?
+		    AND (occasion_year IS NULL OR occasion_year = ?)
 		  ORDER BY ${ORDER_CASE} LIMIT 1`
 	);
 	const looseStmt = db.prepare<[number], { status: GiftStatus }>(
@@ -187,6 +188,7 @@ function annotateGiftState(occasions: UpcomingOccasion[]): void {
 		  WHERE is_archived = 0
 		    AND person_id = ?
 		    AND occasion_id IS NULL
+		    AND status NOT IN ('given', 'returned')
 		  ORDER BY ${ORDER_CASE} LIMIT 1`
 	);
 
@@ -204,7 +206,7 @@ function annotateGiftState(occasions: UpcomingOccasion[]): void {
 		let looseClaimed = false;
 		const looseRow = looseStmt.get(personId);
 		for (const o of list) {
-			let row = exactStmt.get(personId, o.occasionId);
+			let row = exactStmt.get(personId, o.occasionId, o.occasionYear);
 			if (!row && looseRow && !looseClaimed) {
 				row = looseRow;
 				looseClaimed = true;
