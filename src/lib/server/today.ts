@@ -204,12 +204,12 @@ function annotateGiftState(occasions: UpcomingOccasion[]): void {
 	// A handled NULL-occasion gift is ambiguous when the person had a
 	// one-time occasion the same year (e.g. graduation + birthday both in
 	// 2026). Only claim handled gifts when no such ambiguity exists.
-	const oneTimeCountStmt = db.prepare<[number, number], { cnt: number }>(
+	const oneTimeCountStmt = db.prepare<[number, string], { cnt: number }>(
 		`SELECT COUNT(*) AS cnt FROM person_occasions po
 		   JOIN occasions o ON o.id = po.occasion_id
 		  WHERE po.person_id = ? AND po.is_active = 1
 		    AND o.recurrence = 'one_time'
-		    AND SUBSTR(o.date, 1, 4) = CAST(? AS TEXT)`
+		    AND SUBSTR(o.date, 1, 4) = ?`
 	);
 
 	// Group by person so the NEAREST occasion claims any NULL-occasion gift.
@@ -232,7 +232,7 @@ function annotateGiftState(occasions: UpcomingOccasion[]): void {
 					row = active;
 					looseClaimed = true;
 				} else {
-					const { cnt } = oneTimeCountStmt.get(personId, o.occasionYear)!;
+					const { cnt } = oneTimeCountStmt.get(personId, String(o.occasionYear))!;
 					if (cnt === 0) {
 						const handled = looseHandledStmt.get(personId, o.occasionYear);
 						if (handled) {
