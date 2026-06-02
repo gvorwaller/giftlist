@@ -183,13 +183,33 @@ function annotateGiftState(occasions: UpcomingOccasion[]): void {
 		    AND (occasion_year IS NULL OR occasion_year = ?)
 		  ORDER BY ${ORDER_CASE} LIMIT 1`
 	);
-	const looseStmt = db.prepare<[number, number], { status: GiftStatus }>(
+	const looseActiveStmt = db.prepare<[number, number], { status: GiftStatus }>(
 		`SELECT status FROM gifts
 		  WHERE is_archived = 0
 		    AND person_id = ?
 		    AND occasion_id IS NULL
 		    AND (occasion_year IS NULL OR occasion_year = ?)
+		    AND status NOT IN ('given', 'returned')
 		  ORDER BY ${ORDER_CASE} LIMIT 1`
+	);
+	const looseHandledStmt = db.prepare<[number, number], { status: GiftStatus }>(
+		`SELECT status FROM gifts
+		  WHERE is_archived = 0
+		    AND person_id = ?
+		    AND occasion_id IS NULL
+		    AND (occasion_year IS NULL OR occasion_year = ?)
+		    AND status IN ('given', 'returned')
+		  ORDER BY ${ORDER_CASE} LIMIT 1`
+	);
+	// A handled NULL-occasion gift is ambiguous when the person had a
+	// one-time occasion the same year (e.g. graduation + birthday both in
+	// 2026). Only claim handled gifts when no such ambiguity exists.
+	const oneTimeCountStmt = db.prepare<[number, number], { cnt: number }>(
+		`SELECT COUNT(*) AS cnt FROM person_occasions po
+		   JOIN occasions o ON o.id = po.occasion_id
+		  WHERE po.person_id = ? AND po.is_active = 1
+		    AND o.recurrence = 'one_time'
+		    AND SUBSTR(o.date, 1, 4) = CAST(? AS TEXT)`
 	);
 
 	// Group by person so the NEAREST occasion claims any NULL-occasion gift.
@@ -207,10 +227,19 @@ function annotateGiftState(occasions: UpcomingOccasion[]): void {
 		for (const o of list) {
 			let row = exactStmt.get(personId, o.occasionId, o.occasionYear);
 			if (!row && !looseClaimed) {
-				const looseRow = looseStmt.get(personId, o.occasionYear);
-				if (looseRow) {
-					row = looseRow;
+				const active = looseActiveStmt.get(personId, o.occasionYear);
+				if (active) {
+					row = active;
 					looseClaimed = true;
+				} else {
+					const { cnt } = oneTimeCountStmt.get(personId, o.occasionYear)!;
+					if (cnt === 0) {
+						const handled = looseHandledStmt.get(personId, o.occasionYear);
+						if (handled) {
+							row = handled;
+							looseClaimed = true;
+						}
+					}
 				}
 			}
 			if (!row) continue;
