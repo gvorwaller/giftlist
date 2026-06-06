@@ -24,6 +24,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			flash: {
 				imported: Number(url.searchParams.get('imported') ?? '0'),
 				birthdays: Number(url.searchParams.get('birthdays') ?? '0'),
+				yearsBackfilled: Number(url.searchParams.get('years') ?? '0'),
 				error: url.searchParams.get('error')
 			}
 		};

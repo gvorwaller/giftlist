@@ -287,8 +287,8 @@ export function commitImport(
 }
 
 /**
- * Idempotent sweep over all already-linked Google contacts: updates the
- * birthday occasion's year when the contact has one and our row doesn't.
+ * Idempotent sweep over all already-linked Google contacts: fills in missing
+ * birth years AND corrects years that have changed in Google Contacts.
  * Used by the "Refresh birth years" action on /admin/imports/contacts.
  */
 export async function refreshBirthYears(
@@ -304,21 +304,30 @@ export async function refreshBirthYears(
 		   JOIN occasions o ON o.id = po.occasion_id AND o.kind = 'birthday'
 		  WHERE p.google_resource_name = ?`
 	);
+	const updateYear = db.prepare(
+		`UPDATE occasions
+		    SET year = ?, updated_at = CURRENT_TIMESTAMP
+		  WHERE id = ? AND (year IS NULL OR year != ?)`
+	);
 
 	let updated = 0;
 	for (const c of contacts) {
 		if (c.birthday.year == null) continue;
 		const row = byResource.get(c.resource_name);
 		if (!row) continue;
-		if (row.year != null) continue;
-		if (setOccasionYearIfMissing(row.occasion_id, c.birthday.year)) {
+		const result = updateYear.run(c.birthday.year, row.occasion_id, c.birthday.year);
+		if (result.changes > 0) {
 			updated += 1;
+			const action = row.year == null ? 'backfill_birth_year' : 'correct_birth_year';
+			const verb = row.year == null
+				? `Backfilled birth year ${c.birthday.year}`
+				: `Corrected birth year ${row.year} → ${c.birthday.year}`;
 			logAudit({
 				actorUserId,
 				entityType: 'person',
 				entityId: row.person_id,
-				action: 'backfill_birth_year',
-				summary: `Backfilled birth year ${c.birthday.year} for "${c.display_name}"`
+				action,
+				summary: `${verb} for "${c.display_name}"`
 			});
 		}
 	}

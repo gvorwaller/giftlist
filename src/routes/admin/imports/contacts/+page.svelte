@@ -54,7 +54,7 @@
 		{/if}
 		{#if (data.flash?.yearsBackfilled ?? 0) > 0}
 			<div class="flash ok" role="status">
-				Filled in birth year for {data.flash?.yearsBackfilled}
+				Updated birth year for {data.flash?.yearsBackfilled}
 				{data.flash?.yearsBackfilled === 1 ? 'person' : 'people'}.
 			</div>
 		{/if}
@@ -147,7 +147,7 @@
 					</form>
 				</div>
 				<p class="muted">
-					Fills in the birth year on any existing birthday whose year we missed before.
+					Syncs birth years from Google Contacts — fills in missing years and corrects changed ones.
 				</p>
 				<ul class="existing">
 					{#each data.preview.alreadyImported as entry (entry.contact.resource_name)}
