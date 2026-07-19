@@ -1,9 +1,16 @@
 /**
- * Seed / update the two fixed accounts.
+ * Seed / update the fixed accounts.
  *
  * Reads from environment variables (no interactive prompts, no hardcoded secrets):
  *   ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_DISPLAY_NAME
  *   MANAGER_USERNAME, MANAGER_PASSWORD, MANAGER_DISPLAY_NAME
+ *   SUPPORT_USERNAME, SUPPORT_PASSWORD, SUPPORT_DISPLAY_NAME  (optional)
+ *
+ * SUPPORT_* seeds a second admin account and is skipped entirely when unset —
+ * used on family instances (e.g. giftlist-cv) so Gaylon can log in to
+ * troubleshoot. It MUST stay last in SPECS: scheduler/webhook attribution
+ * picks the first admin by id (getAdminUserId), which must be the household's
+ * own admin, not the support account.
  *
  * Idempotent: inserts on first run, updates password_hash + display_name thereafter.
  *
@@ -19,14 +26,17 @@ import { hashPassword } from '../src/lib/server/auth.js';
 import type { Role, User } from '../src/lib/server/types.js';
 
 interface SeedSpec {
-	envPrefix: 'ADMIN' | 'MANAGER';
+	envPrefix: 'ADMIN' | 'MANAGER' | 'SUPPORT';
 	role: Role;
 	defaultDisplayName: string;
+	optional?: boolean;
 }
 
 const SPECS: SeedSpec[] = [
 	{ envPrefix: 'ADMIN', role: 'admin', defaultDisplayName: 'Admin' },
-	{ envPrefix: 'MANAGER', role: 'manager', defaultDisplayName: 'Manager' }
+	{ envPrefix: 'MANAGER', role: 'manager', defaultDisplayName: 'Manager' },
+	// Optional second admin for cross-instance support. Keep last (see header).
+	{ envPrefix: 'SUPPORT', role: 'admin', defaultDisplayName: 'Support', optional: true }
 ];
 
 function requireEnv(name: string): string {
@@ -84,6 +94,10 @@ async function main(): Promise<void> {
 	runMigrations(db);
 
 	for (const spec of SPECS) {
+		if (spec.optional && !process.env[`${spec.envPrefix}_USERNAME`]?.trim()) {
+			console.log(`[seed] skipped: ${spec.envPrefix}_* not set`);
+			continue;
+		}
 		const { action, user } = await upsertUser(spec);
 		console.log(`[seed] ${action}: ${user.role} '${user.username}' (${user.display_name})`);
 	}

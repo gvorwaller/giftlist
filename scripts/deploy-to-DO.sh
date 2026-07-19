@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 # Deploy giftlist to the shared DigitalOcean droplet.
 #
-# Flow:
-#   1. local pre-flight (clean tree, on main, pushed)
-#   2. (optional) push pending commits
+# Two instances run from the same repo (separate checkouts, own .env + SQLite):
+#   giftlist     /opt/giftlist     port 3001  https://gifts.gaylon.photos
+#   giftlist-cv  /opt/giftlist-cv  port 3005  https://giftlist-cv.gaylon.photos
+#
+# By default BOTH are deployed so they never drift. Use --target to deploy one.
+#
+# Flow (per instance):
+#   1. local pre-flight (clean tree, on main, pushed) — once
+#   2. (optional) push pending commits — once
 #   3. SSH single-shot:
 #      a. snapshot prod DB to data/backup/pre-deploy-<utc>.db
 #      b. git pull --ff-only
 #      c. NODE_ENV=development npm ci  (devDeps required; PM2 env contaminates shell)
 #      d. npm run build
-#      e. pm2 restart giftlist --update-env
-#      f. /healthz must return status:ok
-#   4. tail recent pm2 logs + verify public URL
+#      e. pm2 restart <app> --update-env
+#      f. local /healthz must return status:ok
+#   4. verify public URL
 #
 # Why the explicit NODE_ENV=development on install: PM2 sets NODE_ENV=production
 # in the inherited shell environment. A naive `npm ci` then skips
@@ -25,28 +31,47 @@
 set -euo pipefail
 
 DROPLET_IP="134.199.211.199"
-APP_DIR="/opt/giftlist"
-PM2_APP="giftlist"
-HEALTH_URL="http://127.0.0.1:3001/healthz"
-PUBLIC_URL="https://gifts.gaylon.photos/healthz"
+
+# Instance table (macOS ships bash 3.2 — no associative arrays).
+# instance_field <name> dir|port|host
+instance_field() {
+  case "$1:$2" in
+    giftlist:dir)      echo "/opt/giftlist" ;;
+    giftlist:port)     echo "3001" ;;
+    giftlist:host)     echo "gifts.gaylon.photos" ;;
+    giftlist-cv:dir)   echo "/opt/giftlist-cv" ;;
+    giftlist-cv:port)  echo "3005" ;;
+    giftlist-cv:host)  echo "giftlist-cv.gaylon.photos" ;;
+    *) return 1 ;;
+  esac
+}
+ALL_TARGETS=(giftlist giftlist-cv)
 
 # --- argument parsing -------------------------------------------------------
 SKIP_PUSH=0
-for arg in "$@"; do
-  case "$arg" in
-    --skip-push) SKIP_PUSH=1 ;;
+TARGETS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --skip-push) SKIP_PUSH=1; shift ;;
+    --target)
+      [[ $# -ge 2 ]] || { echo "--target requires a value" >&2; exit 2; }
+      TARGETS+=("$2"); shift 2 ;;
     -h|--help)
-      echo "Usage: $0 [--skip-push]"
+      echo "Usage: $0 [--skip-push] [--target giftlist|giftlist-cv]..."
       echo ""
-      echo "Deploys current main to ${DROPLET_IP}:${APP_DIR}."
+      echo "Deploys current main to ${DROPLET_IP}. Default: all instances (${ALL_TARGETS[*]})."
       echo "Bails if working tree is dirty or local main is behind origin/main."
       exit 0
       ;;
     *)
-      echo "Unknown argument: $arg" >&2
+      echo "Unknown argument: $1" >&2
       exit 2
       ;;
   esac
+done
+[[ ${#TARGETS[@]} -gt 0 ]] || TARGETS=("${ALL_TARGETS[@]}")
+for t in "${TARGETS[@]}"; do
+  instance_field "$t" dir >/dev/null || { echo "Unknown target: $t (valid: ${ALL_TARGETS[*]})" >&2; exit 2; }
 done
 
 # --- output helpers ---------------------------------------------------------
@@ -90,12 +115,18 @@ else
   say "Local matches origin/main (${LOCAL_SHA:0:7})"
 fi
 
-# --- remote deploy ----------------------------------------------------------
-say "Connecting to root@${DROPLET_IP}"
+# --- remote deploy (per instance) -------------------------------------------
+for TARGET in "${TARGETS[@]}"; do
+  APP_DIR="$(instance_field "$TARGET" dir)"
+  PM2_APP="${TARGET}"
+  HEALTH_URL="http://127.0.0.1:$(instance_field "$TARGET" port)/healthz"
+  PUBLIC_URL="https://$(instance_field "$TARGET" host)/healthz"
 
-# Single SSH session with `set -e` so any step bails the whole deploy.
-# Heredoc is unquoted so we can interpolate APP_DIR/PM2_APP/HEALTH_URL.
-ssh "root@${DROPLET_IP}" bash <<EOF
+  say "Deploying ${TARGET} -> root@${DROPLET_IP}:${APP_DIR}"
+
+  # Single SSH session with `set -e` so any step bails the whole deploy.
+  # Heredoc is unquoted so we can interpolate APP_DIR/PM2_APP/HEALTH_URL.
+  ssh "root@${DROPLET_IP}" bash <<EOF
 set -euo pipefail
 
 cd "${APP_DIR}"
@@ -144,8 +175,13 @@ echo "==> Recent pm2 output"
 tail -10 /var/log/pm2/${PM2_APP}-out.log
 EOF
 
-say "Public URL health check"
-curl -fsS "${PUBLIC_URL}" || die "Public health check failed (${PUBLIC_URL})"
-echo ""
+  say "Public URL health check (${TARGET})"
+  if curl -fsS "${PUBLIC_URL}"; then
+    echo ""
+    say "${TARGET} live at ${PUBLIC_URL%/healthz}"
+  else
+    warn "Public health check failed (${PUBLIC_URL}) — local healthz passed; DNS/Nginx may not be set up yet."
+  fi
+done
 
-say "Deploy complete: ${LOCAL_SHA:0:7} live at ${PUBLIC_URL%/healthz}"
+say "Deploy complete: ${LOCAL_SHA:0:7} (${TARGETS[*]})"
