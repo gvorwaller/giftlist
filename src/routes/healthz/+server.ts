@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getDb } from '$server/db';
+import { shipmentSchemaState } from '$server/migrate';
 import { getLastSuccess } from '$server/jobs/runner';
 import { JOB_NAME as REMINDER_JOB } from '$server/jobs/reminders';
 import { lastBackupIso } from '$server/admin-home';
@@ -12,6 +13,9 @@ export const GET: RequestHandler = () => {
 	const versionRow = db
 		.prepare<[], { value: string }>("SELECT value FROM app_state WHERE key = 'schema_version'")
 		.get();
+	if (shipmentSchemaState(db) !== 'complete') {
+		return json({ status: 'error', reason: 'Shipment schema incomplete' }, { status: 503 });
+	}
 	const lastReminder = getLastSuccess(REMINDER_JOB);
 	return json({
 		status: 'ok',

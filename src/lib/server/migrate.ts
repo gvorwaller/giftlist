@@ -52,6 +52,20 @@ function setCurrentVersion(db: DB, version: number): void {
 	).run(String(version));
 }
 
+/** Verify the required objects independently of the version marker. */
+export function shipmentSchemaState(db: DB): 'missing' | 'partial' | 'complete' {
+	const hasColumn = (db.pragma('table_info(import_rows)') as Array<{ name: string }>).some(
+		(c) => c.name === 'parsed_order_ids_json'
+	);
+	const count = db
+		.prepare<
+			[],
+			{ n: number }
+		>("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('import_item_resolutions','import_item_gifts')")
+		.get()!.n;
+	return hasColumn && count === 2 ? 'complete' : !hasColumn && count === 0 ? 'missing' : 'partial';
+}
+
 /**
  * Runs any migrations whose version > current schema_version.
  * Each migration runs inside a transaction.
@@ -67,6 +81,21 @@ export function runMigrations(db: DB): { applied: number[]; currentVersion: numb
 	const migrations = loadMigrations();
 	const current = getCurrentVersion(db);
 	const pending = migrations.filter((m) => m.version > current);
+	// The main production database had a pre-existing version-29 marker
+	// without migration 029's objects. Recover that exact, all-absent state
+	// transactionally; never assume a version marker proves schema presence.
+	const shipmentMigration = migrations.find(
+		(m) => m.version === 29 && m.name === 'shipment-reconciliation'
+	);
+	if (current >= 29 && shipmentMigration) {
+		const state = shipmentSchemaState(db);
+		if (state === 'missing') pending.unshift(shipmentMigration);
+		else if (state === 'partial') {
+			throw new Error(
+				'Shipment migration 029 is partially present; refusing an incomplete schema.'
+			);
+		}
+	}
 	const applied: number[] = [];
 
 	for (const m of pending) {
@@ -74,7 +103,7 @@ export function runMigrations(db: DB): { applied: number[]; currentVersion: numb
 		try {
 			db.transaction(() => {
 				db.exec(m.sql);
-				setCurrentVersion(db, m.version);
+				setCurrentVersion(db, Math.max(current, m.version));
 			})();
 			const violations = db.pragma('foreign_key_check') as Array<{
 				table: string;
@@ -96,6 +125,7 @@ export function runMigrations(db: DB): { applied: number[]; currentVersion: numb
 
 	return {
 		applied,
-		currentVersion: pending.length > 0 ? pending[pending.length - 1].version : current
+		currentVersion:
+			pending.length > 0 ? Math.max(current, pending[pending.length - 1].version) : current
 	};
 }
