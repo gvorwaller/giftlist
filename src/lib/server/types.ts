@@ -262,6 +262,7 @@ export type ImportRowDisposition = 'pending' | 'accepted' | 'skipped' | 'failed'
 export type MatchConfidence = 'exact' | 'alias' | 'fuzzy' | 'none';
 
 export interface ImportRow {
+	parsed_order_ids_json?: string | null;
 	id: number;
 	import_run_id: number;
 	source_message_id: string;

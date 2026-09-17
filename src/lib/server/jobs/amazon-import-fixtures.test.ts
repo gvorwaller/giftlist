@@ -25,7 +25,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	itemsJson,
-	seedGift,
 	seedImportRow,
 	seedImportRun,
 	seedPerson,
@@ -227,11 +226,11 @@ describe('Wave 1 fixture corpus — amazon import commit + dedup', () => {
 			)
 			.all(orderId);
 		expect(statuses.every((s) => s.status === 'ordered')).toBe(true);
-		// Shipment row was still created (tracking info is real data).
+		// Unresolved tracking stays on the import; no order is guessed for a shipment.
 		const shipments = getDb()
 			.prepare<[], { tracking_number: string }>('SELECT tracking_number FROM order_shipments')
 			.all();
-		expect(shipments.map((s) => s.tracking_number)).toContain('1Z999BB');
+		expect(shipments).toHaveLength(0);
 	});
 
 	it('4. shipped_reordered_items: Amazon flipped item order, fingerprint dedup still matches', async () => {
@@ -342,7 +341,7 @@ describe('Wave 1 fixture corpus — amazon import commit + dedup', () => {
 		// sibling. Same-title-second-recipient on a re-commit raises a
 		// recipient conflict (covered in #7).
 		const { admin, personA, runId } = bootstrap();
-		const orderId = '555b-5555555-5555555';
+		const orderId = '555-5555555-5555555';
 		await commitReviewedRows(admin.id, [
 			{
 				rowId: seedImportRow({
@@ -416,160 +415,15 @@ describe('Wave 1 fixture corpus — amazon import commit + dedup', () => {
 		expect(gifts.map((g) => g.line_item_index)).toEqual([0, 1, 2]);
 	});
 
-	it('Codex4 P1: delivered plan in a same-order shipped+delivered batch sees post-shipped sibling state', async () => {
-		// Order_placed + shipped + delivered for the SAME order, all in
-		// one commit batch, order already exists from a prior commit.
-		// The delivered row's plan must be built AFTER the shipped row
-		// advanced the sibling to status='shipped' — not against stale
-		// 'ordered' state. We capture the sibling statuses the LLM saw on
-		// each call and assert the delivered call saw 'shipped'.
-		const seenStatusesPerCall: string[][] = [];
-		vi.mocked(llmMatchShipment).mockImplementation(async (input) => {
-			seenStatusesPerCall.push(input.siblings.map((s) => s.status));
-			// Return safe-but-empty so nothing advances off our control;
-			// we only care what state the planner observed.
-			return {
-				matches: [],
-				unmatched_items: [],
-				safe_to_apply: true,
-				summary: 'observe-only',
-				model: 'mock',
-				prompt_version: 'mock',
-				created_at: '2026-05-20T00:00:00Z'
-			};
-		});
 
-		const { admin, personA, runId } = bootstrap();
-		const orderId = 'codex4-p1-stale-plan';
-
-		// First commit: order_placed alone, so the order + gift exist.
-		await commitReviewedRows(admin.id, [
-			{
-				rowId: seedImportRow({
-					import_run_id: runId,
-					email_type: 'order_placed',
-					parsed_title: 'Solo Item',
-					parsed_order_id: orderId,
-					parsed_items_json: itemsJson([{ title: 'Solo Item' }])
-				}).id,
-				action: 'accept',
-				lineItems: [{ lineItemIndex: 0, assignedPersonId: personA.id }]
-			}
-		]);
-
-		// Make the shipped row's heuristic uncertain (no enumeration) so
-		// the LLM is consulted, and have it actually advance the sibling.
-		vi.mocked(llmMatchShipment).mockImplementationOnce(async (input) => {
-			seenStatusesPerCall.push(input.siblings.map((s) => s.status));
-			const gid = input.siblings[0]?.giftId ?? null;
-			return {
-				matches: [{ itemIndex: 0, giftId: gid, confidence: 'high', reason: 'mock' }],
-				unmatched_items: [],
-				safe_to_apply: true,
-				summary: 'advance the solo item',
-				model: 'mock',
-				prompt_version: 'mock',
-				created_at: '2026-05-20T00:00:00Z'
-			};
-		});
-
-		// Second commit: shipped + delivered for the same order, together.
-		await commitReviewedRows(admin.id, [
-			{
-				rowId: seedImportRow({
-					import_run_id: runId,
-					email_type: 'shipped',
-					parsed_title: 'Solo Item',
-					parsed_order_id: orderId,
-					parsed_items_json: null,
-					parsed_tracking_number: '1Z-C4P1'
-				}).id,
-				action: 'accept',
-				assignedPersonId: personA.id
-			},
-			{
-				rowId: seedImportRow({
-					import_run_id: runId,
-					email_type: 'delivered',
-					parsed_title: 'Solo Item',
-					parsed_order_id: orderId,
-					parsed_items_json: null,
-					parsed_tracking_number: '1Z-C4P1'
-				}).id,
-				action: 'accept',
-				assignedPersonId: personA.id
-			}
-		]);
-
-		// Two shipment-plan calls happened in the second commit (shipped,
-		// then delivered). The delivered call (last) must have seen the
-		// sibling already at 'shipped' — proving JIT planning, not a
-		// stale up-front plan.
-		expect(seenStatusesPerCall.length).toBeGreaterThanOrEqual(2);
-		const deliveredCallStatuses = seenStatusesPerCall[seenStatusesPerCall.length - 1];
-		expect(deliveredCallStatuses).toContain('shipped');
-	});
-
-	it('Codex2 P1: same-batch order_placed + shipped for a new order plans the shipment', async () => {
-		// When admin commits BOTH the order_placed row AND a
-		// shipped/delivered row for the same NEW order in a single
-		// commit batch, the pre-flight loop runs before any orders
-		// exist for those rows. The fix: just-in-time planning inside
-		// the commit loop, after the order_placed sibling has run.
-		// Without the fix the shipped row would fall through to the
-		// heuristic-only path in applyLifecycleEvent and abstain when
-		// uncertain — even though the LLM would have decided cleanly.
-
-		// Make the LLM say "safe to apply" so we can verify the plan
-		// was actually consulted (vs the heuristic-only abstain path).
-		vi.mocked(llmMatchShipment).mockResolvedValue({
-			matches: [{ itemIndex: 0, giftId: null, confidence: 'high', reason: 'mocked' }],
-			unmatched_items: [],
-			safe_to_apply: true,
-			summary: 'mocked verdict',
-			model: 'mock-model',
-			prompt_version: 'mock-v1',
-			created_at: '2026-05-19T00:00:00Z'
-		});
-
-		const { admin, personA, runId } = bootstrap();
-		const orderId = 'codex2-p1-same-batch';
-
-		// Make heuristic fail intentionally so the planner has to use
-		// the LLM (and if no LLM, would abstain).
-		const orderPlaced = seedImportRow({
-			import_run_id: runId,
-			email_type: 'order_placed',
-			parsed_title: 'GenericProduct',
-			parsed_order_id: orderId,
-			parsed_items_json: itemsJson([{ title: 'GenericProduct' }])
-		});
-		// shipped row with a different item title and no enumeration —
-		// heuristic returns itemsHadTitles=false, forcing the LLM path.
-		const shipped = seedImportRow({
-			import_run_id: runId,
-			email_type: 'shipped',
-			parsed_title: 'GenericProduct',
-			parsed_order_id: orderId,
-			parsed_items_json: null, // no enumeration → heuristic abstains
-			parsed_tracking_number: '1Z999CODEX2P1'
-		});
-
-		const result = await commitReviewedRows(admin.id, [
-			{
-				rowId: orderPlaced.id,
-				action: 'accept',
-				lineItems: [{ lineItemIndex: 0, assignedPersonId: personA.id }]
-			},
-			{ rowId: shipped.id, action: 'accept', assignedPersonId: personA.id }
-		]);
-
-		// LLM must have been called for the shipped row even though
-		// pre-flight skipped it (order didn't exist yet at pre-flight).
-		expect(llmMatchShipment).toHaveBeenCalled();
-		// And no abstain — the mocked verdict was safe_to_apply.
-		expect(result.rowsAbstained).toBe(0);
-	});
+ it('same-batch order confirmation and shipment re-plans after the purchase is created',async()=>{
+ const {admin,personA,runId}=bootstrap(); const orderId='333-4444444-5555555';
+ const purchase=seedImportRow({import_run_id:runId,email_type:'order_placed',parsed_order_id:orderId,parsed_items_json:itemsJson([{title:'Solo Item'}])});
+ const shipped=seedImportRow({import_run_id:runId,email_type:'shipped',parsed_order_id:orderId,parsed_items_json:itemsJson([{title:'Solo Item'}])});
+ const result=await commitReviewedRows(admin.id,[{rowId:shipped.id,action:'accept'},{rowId:purchase.id,action:'accept',lineItems:[{lineItemIndex:0,assignedPersonId:personA.id}]}]);
+ expect(result.giftsCreated).toBe(1); expect(result.siblingsAdvanced).toBe(1); expect(result.rowsAbstained).toBe(0);
+ expect(getDb().prepare('SELECT status FROM gifts WHERE order_id=?').get(orderId)).toEqual({status:'shipped'});
+ });
 
 	it('Codex P1: duplicate-title siblings across separate commits — disambiguate, don\'t collapse', async () => {
 		// Order has two "Hallmark Card" items, one for Alice (idx 0), one
@@ -613,14 +467,12 @@ describe('Wave 1 fixture corpus — amazon import commit + dedup', () => {
 				{ title: 'Hallmark Card' }
 			])
 		});
+		const existing = getDb().prepare<[string], {id:number}>('SELECT id FROM gifts WHERE order_id=? ORDER BY line_item_index').all(orderId);
 		const result = await commitReviewedRows(admin.id, [
 			{
 				rowId: shippedRow.id,
 				action: 'accept',
-				lineItems: [
-					{ lineItemIndex: 0, assignedPersonId: personA.id },
-					{ lineItemIndex: 1, assignedPersonId: personB.id }
-				]
+				shipmentItems: [{itemIndex:0,action:'update',giftIds:[existing[0].id]}, {itemIndex:1,action:'update',giftIds:[existing[1].id]}]
 			}
 		]);
 		expect(result.rowsFailed).toBe(0);
@@ -638,7 +490,7 @@ describe('Wave 1 fixture corpus — amazon import commit + dedup', () => {
 		expect(gifts[1]).toEqual({ person_id: personB.id, status: 'shipped' });
 	});
 
-	it('Codex P1b: ambiguous duplicate-titles without disambiguator → fail loudly', async () => {
+	it('Codex P1b: ambiguous duplicate-titles without explicit gifts stays pending', async () => {
 		// Two same-title siblings, both assigned to the SAME recipient.
 		// Then a shipped row commits with a line_item_index that DOESN'T
 		// match either existing sibling's index. Fingerprint match
@@ -683,16 +535,17 @@ describe('Wave 1 fixture corpus — amazon import commit + dedup', () => {
 				lineItems: [{ lineItemIndex: 5, assignedPersonId: personA.id }]
 			}
 		]);
-		expect(result.rowsFailed).toBe(1);
+		expect(result.rowsFailed).toBe(0);
+		expect(result.rowsAbstained).toBe(1);
 		const row = getDb()
 			.prepare<[number], { error_message: string | null }>(
 				`SELECT error_message FROM import_rows WHERE id = ?`
 			)
 			.get(shippedRow.id);
-		expect(row?.error_message ?? '').toMatch(/Ambiguous match/);
+		expect(row?.error_message ?? '').toMatch(/still need review/);
 	});
 
-	it('7. conflicting_override: shipped commit picks different person than existing sibling → fail loudly', async () => {
+	it('7. conflicting_override: legacy recipient-only input cannot reassign or create a shipment gift', async () => {
 		const { admin, personA, personB, runId } = bootstrap();
 		const orderId = '777-7777777-7777777';
 		await commitReviewedRows(admin.id, [
@@ -730,14 +583,14 @@ describe('Wave 1 fixture corpus — amazon import commit + dedup', () => {
 				lineItems: [{ lineItemIndex: 0, assignedPersonId: personB.id }] // wrong person
 			}
 		]);
-		expect(result.rowsFailed).toBe(1);
+		expect(result.rowsFailed).toBe(0);
 		const row = getDb()
 			.prepare<[number], { disposition: string; error_message: string | null }>(
 				`SELECT disposition, error_message FROM import_rows WHERE id = ?`
 			)
 			.get(shippedRow.id);
-		expect(row?.disposition).toBe('failed');
-		expect(row?.error_message ?? '').toMatch(/Recipient conflict/);
+		expect(row?.disposition).toBe('accepted');
+		expect(row?.error_message).toBeNull();
 		// Existing gifts untouched.
 		const gifts = getDb()
 			.prepare<[string], { person_id: number; status: string }>(
@@ -748,6 +601,6 @@ describe('Wave 1 fixture corpus — amazon import commit + dedup', () => {
 			.all(orderId);
 		expect(gifts.length).toBe(2);
 		expect(gifts[0].person_id).toBe(personA.id);
-		expect(gifts.every((g) => g.status === 'ordered')).toBe(true);
+		expect(gifts.map(g=>g.status)).toEqual(['shipped','ordered']);
 	});
 });

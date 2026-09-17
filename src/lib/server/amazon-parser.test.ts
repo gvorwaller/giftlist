@@ -209,3 +209,12 @@ describe('parseAmazonEmail trackingUrl wiring', () => {
 		expect(result.trackingUrl).toBeNull();
 	});
 });
+
+it('keeps all combined-shipment order references regardless of their order, including HTML links', () => {
+ const first='113-2783402-5371454', second='113-1189617-2562657';
+ for(const refs of [[first,second],[second,first]]) {
+ const parsed=parseAmazonEmail(msg({subject:'Delivered: "Birthday cards" and 2 more items',bodyText:`Order ${refs[0]}\r\n* Birthday Card For Son In Law\r\n Quantity: 1\r\n`,bodyHtml:`<a href="https://amazon.com/gp/your-account/order-details?orderID=${refs[1]}">Order</a>`}));
+ expect(parsed.orderIds?.sort()).toEqual([first,second].sort());
+ expect(parsed.items).toEqual([{title:'Birthday Card For Son In Law',quantity:1,priceCents:null}]);
+ }
+});

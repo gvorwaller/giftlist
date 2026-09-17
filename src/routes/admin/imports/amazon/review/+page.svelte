@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import type { ActionData, PageData } from './$types';
 	import PersonPicker from '$lib/components/PersonPicker.svelte';
+	import ShipmentItemReview from '$lib/components/ShipmentItemReview.svelte';
 
 	interface Props {
 		data: PageData;
@@ -32,7 +33,7 @@
 		return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 	}
 
-	const pending = $derived(data.rows.filter((r) => r.disposition === 'pending'));
+	const pending = $derived(data.rows.filter((r) => r.disposition === 'pending' || (r.disposition === 'failed' && !!data.shipmentPlans[r.id])));
 	// Wave 1 (Codex round 4 P2): held rows (abstained shipment commits)
 	// are split out so they always render in full with a first-class
 	// resolve panel — never capped or hidden in the handled list.
@@ -42,7 +43,7 @@
 		(r.email_type === 'shipped' || r.email_type === 'delivered');
 	const heldRows = $derived(data.rows.filter(isHeld));
 	const handled = $derived(
-		data.rows.filter((r) => r.disposition !== 'pending' && !isHeld(r))
+		data.rows.filter((r) => !pending.includes(r) && !isHeld(r))
 	);
 
 	// td-3e9ae2 / td-77a119: per-row state for the "Apply same recipient to all"
@@ -176,10 +177,7 @@
 	{#if flashAbstained > 0}
 		<div class="flash warn" role="status">
 			<strong>{flashAbstained} row{flashAbstained === 1 ? '' : 's'} held for review.</strong>
-			The shipment record was created but no sibling gift advanced status —
-			the matcher couldn't confidently decide which items shipped. See the
-			<strong>Held for review</strong> section below to pick which gifts
-			shipped and advance them in one click.
+			Resolved items were saved. Review the remaining items below; their email stays in Inbox until all items are resolved.
 		</div>
 	{/if}
 
@@ -229,7 +227,7 @@
 		</div>
 	{/if}
 
-	{#if pending.length > 0}
+	{#if pending.some(r => r.email_type === 'order_placed')}
 		<form method="POST" action="?/reevaluateMatches" class="llm-tools">
 			<input type="hidden" name="run_id" value={data.run.id} />
 			<button type="submit" class="ghost">Re-run AI matcher for this run</button>
@@ -265,7 +263,8 @@
 		<form method="POST" action="?/commit" class="review-form">
 			<input type="hidden" name="run_id" value={data.run.id} />
 			<p class="muted bulk">
-				Default per row is <strong>accept with matched person</strong> for order lifecycle
+				Shipment rows save the item decisions shown below. Unresolved items stay pending.
+				Default per row is <strong>accept with matched person</strong> for order confirmation
 				emails, <strong>skip</strong> for marketing/review noise. Pick <strong>leave pending</strong>
 				on anything you're unsure about — the email stays in Inbox and re-surfaces on the next
 				scan. Leave person blank to force a manual assignment.
@@ -373,6 +372,16 @@
 							</p>
 						{/if}
 
+						{#if data.shipmentPlans[r.id]}
+							{@const plan = data.shipmentPlans[r.id]}
+							<p>Orders referenced: {plan.orderIds.join(', ') || 'No order number found'}</p>
+							{#if r.error_message}<p role="status">{r.error_message}</p>{/if}
+							{#each plan.items as entry (entry.itemIndex)}
+							    <ShipmentItemReview {plan} {entry} people={data.people} />
+							{/each}
+							<label class="radio"><input type="radio" name="disposition_{r.id}" value="accept" checked /><span>Save the item decisions above</span></label>
+							<label class="radio"><input type="radio" name="disposition_{r.id}" value="leave" /><span>Leave this email unchanged</span></label>
+						{:else}
 						{#if isMultiItem}
 							<fieldset class="line-items">
 								<legend>
@@ -629,6 +638,7 @@
 								</label>
 							{/if}
 						</div>
+						{/if}
 					</li>
 				{/each}
 			</ul>

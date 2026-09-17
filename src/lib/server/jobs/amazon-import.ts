@@ -1,3 +1,4 @@
+import { planShipment, reconcileShipment, type ShipmentDecision } from '../shipment-reconciliation';
 import { getDb } from '../db';
 import { runJob, type JobResult } from './runner';
 import {
@@ -26,7 +27,7 @@ import { getActiveExclusionKeywords, matchExcluded } from '../exclusion-keywords
 import { llmMatchImportRow, type LlmMatchVerdict } from '../llm-matcher';
 import { detectOverride, invalidateCacheKey, sweepExpiredCache, type CommittedItem } from '../matcher-feedback';
 import { getBoolFlag } from '../app-state';
-import { planShipmentAdvanceForRow, type ShipmentAdvancePlan } from '../shipment-decider';
+import type { ShipmentAdvancePlan } from '../shipment-decider';
 import type { ParsedAmazonItem } from '../amazon-parser';
 import type {
 	EmailType,
@@ -125,10 +126,10 @@ export async function runAmazonScan(
 				   from_address, email_type, parsed_title, parsed_order_id, parsed_price_cents,
 				   parsed_tracking_number, parsed_carrier, parsed_recipient_name,
 				   parsed_shipping_address, parsed_gift_message, parsed_amazon_tracking_url,
-				   parsed_items_json, parsed_body_excerpt,
+				   parsed_items_json, parsed_body_excerpt, parsed_order_ids_json,
 				   match_person_id, match_confidence, match_candidates_json, disposition,
 				   llm_verdict_json
-				 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			);
 
 			let summaries;
@@ -255,7 +256,7 @@ export async function runAmazonScan(
 				// Marketing/review_request and unknown-type rows skip the LLM —
 				// they auto-skip in commit anyway and don't need a verdict.
 				const verdictPromises: Array<Promise<string | null>> = staged.map((st) =>
-					st && st.disposition === 'pending'
+					st && st.disposition === 'pending' && st.parse.emailType === 'order_placed'
 						? buildAndCallMatcher(st.parse, st.bodyExcerpt)
 						: Promise.resolve(null)
 				);
@@ -296,6 +297,7 @@ export async function runAmazonScan(
 						parse.trackingUrl,
 						itemsJson,
 						bodyExcerpt,
+						JSON.stringify(parse.orderIds ?? []),
 						match.personId,
 						match.confidence,
 						candidatesJson,
@@ -572,6 +574,7 @@ export async function reevaluateImportRowsForRun(runId: number): Promise<Reevalu
 		`UPDATE import_rows SET llm_verdict_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
 	);
 	for (const row of rows) {
+		if (row.email_type !== 'order_placed') continue;
 		out.evaluated += 1;
 		try {
 			const json = await buildAndCallMatcherFromRow(row);
@@ -589,6 +592,7 @@ export async function reevaluateImportRowsForRun(runId: number): Promise<Reevalu
 // Commit path
 
 export interface CommitRowInput {
+	shipmentItems?: ShipmentDecision[];
 	rowId: number;
 	action: 'accept' | 'skip';
 	assignedPersonId?: number;
@@ -627,11 +631,8 @@ export interface CommitResult {
 	rowsSkipped: number;
 	rowsFailed: number;
 	labelMoveFailures: number;
-	/** Wave 1 Phase 2: rows where the LLM/heuristic could not confidently
-	 * decide which siblings shipped. Their shipment row was still
-	 * created, but no sibling advanced status; row is flagged with an
-	 * `error_message` describing the abstain so admin can manually
-	 * advance from /admin/system. */
+	/** Shipment rows with unresolved items. Resolved items are saved; the
+	 * email remains in Inbox until every item has a decision. */
 	rowsAbstained: number;
 }
 
@@ -680,43 +681,6 @@ export async function commitReviewedRows(
 		byOrder.get(key)!.push(d);
 	}
 
-	// Wave 1 Phase 2: shipment-advance decisions need an async LLM call,
-	// but the commit loop is otherwise sync DB work.
-	//
-	// Codex round 4 P1: the planner feeds each sibling's CURRENT status
-	// into the LLM prompt. A pre-flight that plans all rows up front in
-	// parallel would build the `delivered` row's plan against stale
-	// `ordered`-status siblings before the same order's `shipped` row
-	// advances them. So we plan JIT — inside the commit loop, right
-	// before each shipment row's `applyLifecycleEvent`, after every
-	// earlier row in lifecycle order has already mutated state. The lost
-	// parallelism is negligible (batches are 1-3 rows in practice) and
-	// JIT-only is correct under every commit ordering.
-	//
-	// `computeShipmentPlan` is called once per shipment row from the
-	// commit loop. No memoization across rows — each call re-reads
-	// current sibling state. (The LLM matcher's own cache absorbs
-	// identical re-calls; its key now includes a sibling-status hash so
-	// a re-plan after a status change correctly misses the cache.)
-	const computeShipmentPlan = async (
-		row: ImportRow
-	): Promise<ShipmentAdvancePlan | null> => {
-		if (row.email_type !== 'shipped' && row.email_type !== 'delivered') return null;
-		if (!row.parsed_order_id) return null;
-		const order = getOrderByOrderId(row.parsed_order_id);
-		if (!order) return null;
-		const items = parseRowItems(row);
-		try {
-			return await planShipmentAdvanceForRow(row, order.id, items);
-		} catch (err) {
-			console.warn(`[amazon-import] shipment plan failed for row ${row.id}:`, err);
-			return {
-				kind: 'abstain',
-				reason: 'Planner threw; siblings held pending manual review.'
-			};
-		}
-	};
-
 	// Collect message ids to move in a single Gmail batchModify at the end —
 	// one round trip instead of one per message.
 	const messagesToMove: string[] = [];
@@ -733,7 +697,9 @@ export async function commitReviewedRows(
 
 		// If any decision in this group links to an existing gift, that wins:
 		// load it once, override personId from the gift, skip create.
-		const linkDecision = orderedGroup.find((x) => x.d.assignedGiftId);
+		const linkDecision = orderedGroup.find(
+			(x) => x.row.email_type === 'order_placed' && x.d.assignedGiftId
+		);
 		const linkedGift =
 			linkDecision && linkDecision.d.assignedGiftId
 				? getGiftById(linkDecision.d.assignedGiftId)
@@ -741,12 +707,42 @@ export async function commitReviewedRows(
 
 		let giftId: number | null = linkedGift?.id ?? null;
 		for (const { d, row } of orderedGroup) {
+			if (row.email_type === 'shipped' || row.email_type === 'delivered') {
+				try {
+					// Shipment emails never enter the purchase/create-by-recipient path.
+					const explicitLinks = d.lineItems
+						?.filter((i) => i.assignedGiftId)
+						.map((i) => ({
+							itemIndex: i.lineItemIndex,
+							action: 'update' as const,
+							giftIds: [i.assignedGiftId!]
+						}));
+					const shipmentItems = d.shipmentItems ?? (explicitLinks?.length
+						? explicitLinks
+						: d.assignedGiftId
+							? [{ itemIndex: 0, action: 'update' as const, giftIds: [d.assignedGiftId] }]
+							: undefined);
+					const committed = reconcileShipment(row.id, userId, shipmentItems);
+					result.giftsCreated += committed.created;
+					result.giftsLinked += committed.linked;
+					result.siblingsAdvanced += committed.advanced;
+					if (committed.complete) messagesToMove.push(row.source_message_id);
+					else result.rowsAbstained++;
+				} catch (err) {
+					updateRow.run(
+						'failed', row.gift_id, row.match_person_id, row.match_confidence,
+						err instanceof Error ? err.message : String(err), row.id
+					);
+					result.rowsFailed++;
+				}
+				continue;
+			}
+
 			// td-3e9ae2: multi-item path. When the admin specified per-line
 			// recipients (typically on the order_placed email of a 2+ item
 			// order), create one order + N gifts up front and skip the
-			// single-gift legacy path. Subsequent shipped/delivered emails
-			// for the same order auto-bind via applyLifecycleEvent → order
-			// sibling-walk.
+			// single-gift legacy path. Shipment reconciliation above handles
+			// subsequent notifications using each item's identity.
 			if (d.lineItems && d.lineItems.length > 0 && !linkedGift) {
 				try {
 					const items = parseRowItems(row);
@@ -755,14 +751,9 @@ export async function commitReviewedRows(
 					result.giftsLinked += ids.linkedIds.length;
 					// Use the first-item gift as the canonical id for the
 					// import_rows.gift_id column (one column, N gifts — pick
-					// the first stably). All N share the parent order_pk so
-					// follow-up emails advance the entire group.
+					// the first stably). Per-item shipment links live separately.
 					giftId = ids.allIds[0] ?? null;
-					// Codex2 P1 / Codex4 P1: plan JIT, right here, after this
-					// group's order_placed sibling has created the order AND
-					// any earlier shipment row has advanced sibling status.
-					const plan = await computeShipmentPlan(row);
-					const evt = applyLifecycleEvent(giftId!, row, userId, plan);
+					const evt = applyLifecycleEvent(giftId!, row, userId, null);
 					if (evt.abstained) result.rowsAbstained += 1;
 					result.siblingsAdvanced += evt.advancedCount;
 					updateRow.run(
@@ -833,11 +824,7 @@ export async function commitReviewedRows(
 					if (resolved.created) result.giftsCreated += 1;
 					else result.giftsLinked += 1;
 				}
-				// Codex2 P1 / Codex4 P1: plan JIT, right here, after this
-				// group's order_placed sibling has created the order AND
-				// any earlier shipment row has advanced sibling status.
-				const plan = await computeShipmentPlan(row);
-				const evt = applyLifecycleEvent(giftId, row, userId, plan);
+				const evt = applyLifecycleEvent(giftId, row, userId, null);
 				if (evt.abstained) result.rowsAbstained += 1;
 				result.siblingsAdvanced += evt.advancedCount;
 				updateRow.run(
@@ -865,6 +852,12 @@ export async function commitReviewedRows(
 	for (const d of skipped) {
 		const row = rowStmt.get(d.rowId);
 		if (!row) continue;
+		if (row.email_type === 'shipped' || row.email_type === 'delivered') {
+			const plan = planShipment(row, userId);
+			reconcileShipment(row.id, userId, plan.items.filter((i) => !i.resolved).map((i) => ({
+				itemIndex: i.itemIndex, action: 'ignore'
+			})));
+		}
 		updateRow.run('skipped', row.gift_id, row.match_person_id, row.match_confidence, null, row.id);
 		result.rowsSkipped += 1;
 		messagesToMove.push(row.source_message_id);
@@ -936,15 +929,32 @@ function parseVerdictJson(json: string | null): LlmMatchVerdict | null {
  * stricter recipient gate — deferred). Returns the CommitRowInput to link
  * those gifts, or null if the row needs human review.
  *
- * Shipment-row status advances stay governed by the shipment-decider abstain
- * at commit time, so auto-accepting a confidently-linked shipped/delivered
- * row is safe: the abstain still holds sibling status when uncertain.
+ * Shipment rows qualify through the shared deterministic plan only when
+ * every item is resolved, excluded, or uniquely matches an existing gift.
  */
 function autoAcceptDecisionForRow(
 	row: ImportRow,
 	exclusions: ReturnType<typeof getActiveExclusionKeywords>
 ): CommitRowInput | null {
 	if (row.disposition !== 'pending') return null;
+	// Shipment review uses deterministic item plans, never a stale purchase LLM verdict.
+	if (row.email_type === 'shipped' || row.email_type === 'delivered') {
+		const actor = getDb()
+			.prepare<[number], { actor_user_id: number }>('SELECT actor_user_id FROM import_runs WHERE id=?')
+			.get(row.import_run_id);
+		if (!actor) return null;
+		const plan = planShipment(row, actor.actor_user_id);
+		if (!plan.items.every((i) => i.resolved || i.excluded || i.giftId)) return null;
+		return {
+			rowId: row.id,
+			action: 'accept',
+			shipmentItems: plan.items.filter((i) => !i.resolved).map((i) => ({
+				itemIndex: i.itemIndex,
+				action: i.excluded ? 'ignore' : 'match',
+				giftIds: i.giftId ? [i.giftId] : undefined
+			}))
+		};
+	}
 	const verdict = parseVerdictJson(row.llm_verdict_json);
 	if (!verdict || verdict.matches.length === 0) return null;
 	const items = parseRowItems(row);

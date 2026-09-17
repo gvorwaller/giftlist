@@ -21,6 +21,8 @@ export interface ParsedAmazonEmail {
 	emailType: EmailType;
 	title: string | null;
 	orderId: string | null;
+	/** All body/link references; none alone establishes item ownership. */
+	orderIds?: string[];
 	priceCents: number | null;
 	trackingNumber: string | null;
 	carrier: string | null;
@@ -368,7 +370,7 @@ function extractGiftMessage(body: string): string | null {
 export function parseAmazonEmail(msg: GmailMessageFull): ParsedAmazonEmail {
 	const subject = (msg.subject ?? '').trim();
 	const emailType = classify(subject);
-	const body = msg.bodyText || '';
+	const body = (msg.bodyText || '').replace(/\r\n/g, '\n');
 
 	// For non-gift-relevant emails we still keep a stub record so the admin
 	// UI can batch-skip/dispose of them without re-fetching.
@@ -412,6 +414,7 @@ export function parseAmazonEmail(msg: GmailMessageFull): ParsedAmazonEmail {
 		emailType,
 		title,
 		orderId,
+		orderIds: [...new Set(`${body} ${msg.bodyHtml ?? ''}`.match(/\b\d{3}-\d{7}-\d{7}\b/g) ?? [])],
 		priceCents,
 		trackingNumber: tracking,
 		carrier,

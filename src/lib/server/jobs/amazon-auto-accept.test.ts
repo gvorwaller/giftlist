@@ -31,7 +31,7 @@ function verdict(matches: MatchSpec[]): string {
 	});
 }
 
-describe('buildAutoAcceptDecisions — link-only gate', () => {
+describe('buildAutoAcceptDecisions — purchase LLM link-only gate', () => {
 	let runId: number;
 	let personId: number;
 	beforeEach(() => {
@@ -50,7 +50,7 @@ describe('buildAutoAcceptDecisions — link-only gate', () => {
 	}): ImportRow {
 		return seedImportRow({
 			import_run_id: runId,
-			email_type: opts.email_type ?? 'delivered',
+			email_type: opts.email_type ?? 'order_placed',
 			parsed_title: opts.title ?? null,
 			parsed_items_json: opts.items ? itemsJson(opts.items) : null,
 			llm_verdict_json: opts.verdict

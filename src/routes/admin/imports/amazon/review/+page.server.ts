@@ -1,3 +1,4 @@
+import { listShipmentGifts, planShipment, type ShipmentPlan, type ShipmentDecision } from '$server/shipment-reconciliation';
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { listPeople } from '$server/people';
@@ -178,6 +179,8 @@ export const load: PageServerLoad = ({ locals, url }) => {
 	// pickers in the UI; single-item rows fall back to the legacy single
 	// picker.
 	const rowItems: Record<number, ParsedAmazonItem[]> = {};
+	const shipmentPlans: Record<number, ShipmentPlan> = {};
+	const shipmentGifts = listShipmentGifts(locals.user.id);
 	// Wave 1: candidate pools the UI renders as radio options. Built
 	// from the CURRENT open-gifts state (admin may have added gifts
 	// since the scan), so the radios always offer real, linkable
@@ -210,6 +213,12 @@ export const load: PageServerLoad = ({ locals, url }) => {
 		`SELECT display_name FROM people WHERE id = ?`
 	);
 	for (const r of rows) {
+		if (
+			(r.email_type === 'shipped' || r.email_type === 'delivered') &&
+			(r.disposition === 'pending' || r.disposition === 'failed')
+		) {
+			shipmentPlans[r.id] = planShipment(r, locals.user.id, shipmentGifts);
+		}
 		const items = parseItems(r.parsed_items_json);
 		if (items.length > 0) rowItems[r.id] = items;
 		if (isHeldRow(r) && r.parsed_order_id) {
@@ -300,6 +309,7 @@ export const load: PageServerLoad = ({ locals, url }) => {
 		rows,
 		people,
 		rowItems,
+		shipmentPlans,
 		llmVerdicts,
 		giftCandidates,
 		lineItemCandidates,
@@ -333,6 +343,20 @@ function parseDecisions(fd: FormData): CommitRowInput[] {
 			continue;
 		}
 		if (dispositionRaw === 'accept') {
+			const shipmentItems: ShipmentDecision[] = [];
+			for (const [key, value] of fd.entries()) {
+				const m = key.match(new RegExp(`^shipment_${rowId}_(\\d+)_action$`));
+				if (!m) continue;
+				const prefix = `shipment_${rowId}_${m[1]}`;
+				shipmentItems.push({
+					itemIndex: Number(m[1]),
+					action: String(value) as ShipmentDecision['action'],
+					giftIds: fd.getAll(`${prefix}_gift`).map(Number),
+					personId: Number(fd.get(`${prefix}_person`)) || undefined,
+					orderId: String(fd.get(`${prefix}_order`) ?? '') || undefined
+				});
+			}
+
 			// td-3e9ae2: collect per-line-item recipient picks (`lineperson_<row>_<idx>`).
 			// Form field naming: name="lineperson_42_0" value="<personId>". Items left
 			// at the empty default fall through to the legacy single-recipient picker.
@@ -361,6 +385,7 @@ function parseDecisions(fd: FormData): CommitRowInput[] {
 
 			decisions.push({
 				rowId,
+				shipmentItems: shipmentItems.length ? shipmentItems : undefined,
 				action: 'accept',
 				assignedPersonId:
 					Number.isFinite(assignedPerson) && assignedPerson > 0 ? assignedPerson : undefined,
