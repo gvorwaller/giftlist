@@ -813,12 +813,13 @@
 									<input type="hidden" name="row_id" value={r.id} />
 									<label class="reassign-row">
 										<span class="lbl">Assign to person</span>
-										<select name="person_id" required>
-											<option value="">— choose —</option>
-											{#each data.people as p (p.id)}
-												<option value={p.id}>{p.display_name}</option>
-											{/each}
-										</select>
+										<PersonPicker
+											people={data.people}
+											value={null}
+											name="person_id"
+											required
+											placeholder="— choose —"
+										/>
 									</label>
 									{#if r.parsed_recipient_name}
 										<label class="alias">
@@ -997,16 +998,6 @@
 		color: var(--muted);
 	}
 
-	.choice-grid select {
-		min-height: 40px;
-		padding: 8px 10px;
-		font-family: var(--font-sans);
-		font-size: 15px;
-		background: var(--bg);
-		border: 1px solid var(--line);
-		border-radius: var(--radius-control);
-		color: var(--ink);
-	}
 
 	.choice-grid .hint {
 		font-family: var(--font-sans);
@@ -1125,14 +1116,6 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: var(--muted);
-	}
-	.line-pick select {
-		min-height: 48px;
-		padding: 8px 10px;
-		border-radius: var(--radius-control);
-		border: 1px solid var(--line);
-		background: var(--bg);
-		font-size: 16px;
 	}
 	.line-gift {
 		border: 1px solid var(--green);
@@ -1650,16 +1633,6 @@
 		color: var(--muted);
 	}
 
-	.reassign-row select {
-		min-height: var(--tap-target);
-		padding: 8px 12px;
-		font-family: var(--font-sans);
-		font-size: 15px;
-		background: var(--paper);
-		border: 1px solid var(--line);
-		border-radius: var(--radius-control);
-		color: var(--ink);
-	}
 
 	.alias {
 		display: flex;

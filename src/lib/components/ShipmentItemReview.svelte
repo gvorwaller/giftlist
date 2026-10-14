@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import type { ShipmentPlan, ShipmentItemPlan } from '$server/shipment-reconciliation';
+	import type { Person } from '$lib/server/types';
+	import PersonPicker from './PersonPicker.svelte';
 	let {
 		plan,
 		entry,
@@ -8,17 +10,17 @@
 	}: {
 		plan: ShipmentPlan;
 		entry: ShipmentItemPlan;
-		people: Array<{ id: number; display_name: string }>;
+		people: Person[];
 	} = $props();
 	const initial = untrack(() => entry);
 	let action = $state(initial.excluded ? 'ignore' : initial.giftId ? 'match' : 'pending');
-	let person = $state('');
+	let person = $state<number | null>(null);
 	let selected = $state<number[]>([]);
 	let order = $state(untrack(() => (plan.orderIds.length === 1 ? plan.orderIds[0] : '')));
 	const prefix = $derived(`shipment_${plan.rowId}_${entry.itemIndex}`);
 	const match = $derived(plan.gifts.find((g) => g.id === entry.giftId));
 	const choices = $derived(
-		plan.gifts.filter((g) => !g.is_archived && (!person || g.person_id === Number(person)))
+		plan.gifts.filter((g) => !g.is_archived && (person == null || g.person_id === person))
 	);
 	function label(g: ShipmentPlan['gifts'][number]) {
 		const settled =
@@ -73,14 +75,15 @@
 		{:else if action === 'update' || action === 'create'}
 			<label
 				>Person
-				<select name="{prefix}_person" bind:value={person} required={action === 'create'}>
-					<option value=""
-						>{action === 'update'
-							? 'All people — choose to narrow gifts'
-							: 'Choose recipient'}</option
-					>
-					{#each people as p (p.id)}<option value={String(p.id)}>{p.display_name}</option>{/each}
-				</select>
+				<PersonPicker
+					{people}
+					bind:value={person}
+					name="{prefix}_person"
+					required={action === 'create'}
+					placeholder={action === 'update'
+						? 'All people — type to narrow gifts'
+						: 'Type to find a recipient'}
+				/>
 			</label>
 			{#if action === 'update'}
 				<p>
