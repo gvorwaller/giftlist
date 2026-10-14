@@ -6,11 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Session Startup (Do These First, In Order)
 
-1. **Read `cs.md`** — hard rules on debugging methodology, infrastructure details, and historical failures. Non-negotiable.
-2. **Read `docs/gift-tracker-design.md`** — the authoritative design spec. If other docs conflict, the design doc wins.
-3. **Read `docs/gift-tracker-implementation-plan-Codex.md`** — phased delivery plan and schema order.
-4. **Check recent devlog** — review the last few entries in `docs/devlog/` for recent decisions and work.
-5. **Task management** — run `td usage --new-session` to see current work (after reading docs).
+1. **Read `cs.md`** — hard rules on debugging methodology, infrastructure, data and outside-service safety, and historical failures. Non-negotiable.
+2. **Read `docs/agent-development-guide.md`** completely — the canonical cross-agent workflow: scope control, protecting the dev DB / prod / Gmail / paid APIs, testing evidence, handoff, and release gates.
+3. **Read `docs/gift-tracker-design-Claude.md`** — the authoritative design spec (V3). If other docs conflict, the design doc wins.
+4. **Read `docs/2026-04-15_implementation-plan.md`** — phased delivery plan and schema order.
+5. **Check recent devlog** — review the last few entries in `docs/devlog/` for recent decisions and work.
+6. **Task management** — run `td usage --new-session` to see current work (after reading docs); `td usage -q` afterwards. Don't `td close` your own work — `td review` → independent `td approve`.
+
+**Never without an explicit request for that specific action:** commit, push, deploy, change production data on either instance, or trigger outside side effects (Gmail relabel/scan, paid LLM or Shippo calls, Telegram/email sends). See `cs.md` → Outside Services Are Real.
 
 ## Project Overview
 
@@ -18,7 +21,7 @@ Mobile-first gift tracking web app with two roles: a gift manager (primary user)
 
 **Accessibility is a core design constraint, not a nice-to-have.** See design spec Section 11 for detailed guidelines.
 
-The original 6-phase plan in `docs/gift-tracker-implementation-plan-Codex.md` is largely shipped (phases 1-6 complete; ongoing work tracked in `td` and `docs/devlog/YYYY-MM-DD.md`). Schema currently at **v28**.
+The original 6-phase plan in `docs/2026-04-15_implementation-plan.md` is largely shipped (phases 1-6 complete; ongoing work tracked in `td` and `docs/devlog/YYYY-MM-DD.md`). Schema currently at **v29**.
 
 ## Commands
 
@@ -58,9 +61,9 @@ cc-status --lines 20                         # last 20 entries
 
 ### Document Hierarchy
 - `docs/gift-tracker-design-Claude.md` — **authoritative design spec (V3)**. If other docs conflict, this wins.
-- `docs/gift-tracker-design.md` — original V1 design (historical reference, detailed context on import pipeline, accessibility rationale)
-- `docs/gift-tracker-design-Codex.md` — V2 Codex redesign (historical reference)
-- `docs/gift-tracker-implementation-plan-Codex.md` — phased delivery plan (still valid, schema order updated in V3)
+- `docs/2026-04-15_implementation-plan.md` — phased delivery plan (still valid, schema order updated in V3)
+- `docs/agent-development-guide.md` — cross-agent coding, safety, testing, and release workflow
+- The V1 (`gift-tracker-design.md`) and V2 Codex design docs were never committed to this repo; V3 supersedes both.
 
 ### Runtime Constraints
 - **Single process only** — SQLite with WAL mode, single-writer. No PM2 cluster mode, no multi-instance.
@@ -70,7 +73,7 @@ cc-status --lines 20                         # last 20 entries
 ### Data Layer
 SQLite (WAL, single-writer). Migrations live in `migrations/NNN-name.sql` and run at boot via `src/lib/server/migrate.ts`. The runner toggles `PRAGMA foreign_keys = OFF` before each migration's transaction and runs `PRAGMA foreign_key_check` after commit, so migrations needing the SQLite recreate-table pattern (e.g. 014, 015) are safe.
 
-Current schema (v28) — tables grouped by domain:
+Current schema (v29) — tables grouped by domain:
 
 - **Identity**: `users`, `sessions`, `external_tokens` (encrypted Google OAuth)
 - **Recipients**: `people` (with `is_self` + `owner_user_id` for per-user privacy on personal packages), `person_aliases`

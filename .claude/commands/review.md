@@ -71,8 +71,8 @@ Use the **Task tool** to spawn a sub-agent (`subagent_type: "general-purpose"`) 
 > - Error messages leaking internal details?
 >
 > ### UI Convention Compliance (if frontend files changed)
-> - NO toast notifications (react-toastify, sonner, etc.) — use styled confirmation modals
-> - Follows reddit-intelligence CSS class patterns
+> - NO toast notifications — use styled confirmation modals
+> - Component-scoped Svelte `<style>` blocks only (no Tailwind/utility frameworks); WCAG AAA 7:1 contrast; status = color + text label; 48px tap targets, 18px+ text
 > - Modals follow the standard modal-overlay/modal-content pattern
 >
 > **Output Format — You MUST use this exact format:**
@@ -211,7 +211,7 @@ This step sends the reviewed files to OpenAI Codex (GPT-5.4) for an **independen
 >
 > **Files to review:** [list all files modified during the review cycle, plus any files they directly consume or are consumed by]
 >
-> **Repository context:** Node.js backend with SQLite. Pay attention to SQLite-specific quirks: JSON columns return as strings (need `JSON.parse()`), `INTEGER` vs `TEXT` type coercion, and `better-sqlite3` vs `sqlite3` async patterns. Read the project's CLAUDE.md for additional context.
+> **Repository context:** SvelteKit (Svelte 5 runes, TypeScript, adapter-node) with SQLite via synchronous `better-sqlite3` (WAL, single writer). This is giftlist (gifts.gaylon.photos + giftlist-cv): a gift/package tracker with Gmail-driven Amazon and tracking-email importers, an Anthropic LLM matcher, and Shippo tracking. Focus on SQLite type-boundary issues (JSON columns as strings, 0/1 booleans, TEXT dates), transaction correctness (no `await` inside a `db.transaction` body), import commit/dedup and LLM-cache-key logic, role/privacy guards (manager vs admin, `isPersonVisibleToUser` on any POST taking a person_id), audit-log coverage of mutations, tests that touch the DB without `setupTestDb()`, and Svelte 5 runes correctness. Never log OAuth tokens, API keys, or email bodies. Read the project's `cs.md` and `docs/agent-development-guide.md` for additional context.
 >
 > **Output format — use this exact structure:**
 > ```
