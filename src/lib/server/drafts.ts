@@ -1,8 +1,24 @@
 import { getDb } from './db';
+import { findManagerUser } from './auth';
 import type { Draft, DraftType } from './types';
 
 export const DRAFT_STALE_DAYS = 7;
 const DRAFT_STALE_MS = DRAFT_STALE_DAYS * 24 * 60 * 60 * 1000;
+
+/**
+ * Whose drafts a request reads and writes. In preview-as-manager the admin
+ * sees the manager's Today (including her "Continue draft" nudge), so the
+ * draft the admin then continues, autosaves, deletes, or turns into a gift
+ * must be the manager's draft too — not the admin's own.
+ */
+export function draftOwnerId(locals: App.Locals): number {
+	if (!locals.user) throw new Error('draftOwnerId requires an authenticated user');
+	if (locals.previewAsManager) {
+		const manager = findManagerUser();
+		if (manager) return manager.id;
+	}
+	return locals.user.id;
+}
 
 export function isStale(draft: Draft): boolean {
 	const created = Date.parse(draft.created_at);

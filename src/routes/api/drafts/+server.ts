@@ -1,6 +1,6 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { deleteDraft, upsertDraft } from '$server/drafts';
+import { deleteDraft, draftOwnerId, upsertDraft } from '$server/drafts';
 import type { DraftType } from '$server/types';
 
 const ALLOWED_TYPES: ReadonlySet<DraftType> = new Set(['gift']);
@@ -26,7 +26,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (obj.payload == null || typeof obj.payload !== 'object') {
 		throw error(400, 'payload must be an object');
 	}
-	const draft = upsertDraft(locals.user.id, draftType, obj.payload);
+	const draft = upsertDraft(draftOwnerId(locals), draftType, obj.payload);
 	return json({ id: draft.id, updated_at: draft.updated_at });
 };
 
@@ -34,6 +34,6 @@ export const DELETE: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) throw error(401, 'Not authenticated');
 	const url = new URL(request.url);
 	const draftType = requireType(url.searchParams.get('draft_type'));
-	deleteDraft(locals.user.id, draftType);
+	deleteDraft(draftOwnerId(locals), draftType);
 	return new Response(null, { status: 204 });
 };

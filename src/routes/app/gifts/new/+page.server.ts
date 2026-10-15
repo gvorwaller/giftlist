@@ -3,7 +3,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { listPeople, getPersonById, isPersonVisibleToUser } from '$server/people';
 import { listPersonOccasions, nextOccurrenceDate } from '$server/occasions';
 import { createGift, parseDollarsToCents } from '$server/gifts';
-import { deleteDraft, getFreshDraft, parseDraftPayload } from '$server/drafts';
+import { deleteDraft, draftOwnerId, getFreshDraft, parseDraftPayload } from '$server/drafts';
 import { listVendors, getVendorById } from '$server/vendors';
 import { listShippers, getShipperById } from '$server/shippers';
 import { registerWithProvider } from '$server/tracking';
@@ -55,7 +55,7 @@ export const load: PageServerLoad = ({ locals, url }) => {
 	let prefill: GiftDraftPayload = {};
 	let draftUpdatedAt: string | null = null;
 
-	const draft = getFreshDraft(locals.user.id, 'gift');
+	const draft = getFreshDraft(draftOwnerId(locals), 'gift');
 	if (draft) {
 		prefill = parseDraftPayload<GiftDraftPayload>(draft) ?? {};
 		draftUpdatedAt = draft.updated_at;
@@ -179,7 +179,7 @@ export const actions: Actions = {
 			},
 			locals.user.id
 		);
-		deleteDraft(locals.user.id, 'gift');
+		deleteDraft(draftOwnerId(locals), 'gift');
 
 		// Fire-and-forget Shippo registration. We don't block the redirect on
 		// the network call — failures are logged and the next manual or
@@ -195,8 +195,16 @@ export const actions: Actions = {
 
 	discardDraft: ({ locals }) => {
 		if (!locals.user) throw error(401, 'Not authenticated');
-		deleteDraft(locals.user.id, 'gift');
+		deleteDraft(draftOwnerId(locals), 'gift');
 		throw redirect(303, '/app/gifts/new');
+	},
+
+	// Bottom-of-form "Delete draft" (after inline confirm): drop the draft and
+	// leave the form, unlike "Start fresh" which reopens an empty form.
+	deleteDraft: ({ locals }) => {
+		if (!locals.user) throw error(401, 'Not authenticated');
+		deleteDraft(draftOwnerId(locals), 'gift');
+		throw redirect(303, '/app/today');
 	}
 };
 

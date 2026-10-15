@@ -98,6 +98,7 @@
 	);
 	let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 	let submitting = $state(false);
+	let confirmingDelete = $state(false);
 
 	function snapshot(): GiftDraftPayload {
 		return {
@@ -237,6 +238,9 @@
 		class="card"
 		use:enhance={() => {
 			submitting = true;
+			// A pending autosave must not re-create the draft after Save gift or
+			// Delete draft removes it server-side.
+			if (autosaveTimer) clearTimeout(autosaveTimer);
 			return async ({ update }) => {
 				await update();
 				submitting = false;
@@ -373,12 +377,37 @@
 			<p class="error" role="alert">{form.error}</p>
 		{/if}
 
-		<div class="actions">
-			<a href="/app/today" class="ghost">Cancel</a>
-			<button type="submit" class="primary" disabled={submitting}>
-				{submitting ? 'Saving…' : 'Save gift'}
-			</button>
-		</div>
+		{#if confirmingDelete}
+			<div class="delete-confirm" role="group" aria-labelledby="delete-confirm-q">
+				<p id="delete-confirm-q">Delete this draft? What you've entered so far will be lost.</p>
+				<div class="actions">
+					<button type="button" class="ghost" onclick={() => (confirmingDelete = false)}>
+						Keep it
+					</button>
+					<button
+						type="submit"
+						class="danger-btn"
+						formaction="?/deleteDraft"
+						formnovalidate
+						disabled={submitting}
+					>
+						Yes, delete draft
+					</button>
+				</div>
+			</div>
+		{:else}
+			<div class="actions">
+				{#if lastSavedAt}
+					<button type="button" class="ghost danger" onclick={() => (confirmingDelete = true)}>
+						Delete draft
+					</button>
+				{/if}
+				<a href="/app/today" class="ghost">Cancel</a>
+				<button type="submit" class="primary" disabled={submitting}>
+					{submitting ? 'Saving…' : 'Save gift'}
+				</button>
+			</div>
+		{/if}
 	</form>
 </main>
 
@@ -612,5 +641,44 @@
 		background: transparent;
 		color: var(--muted);
 		border-color: var(--line);
+	}
+
+	.actions {
+		flex-wrap: wrap;
+	}
+
+	.ghost.danger {
+		color: var(--rose);
+		border-color: var(--rose);
+		margin-right: auto;
+	}
+
+	.delete-confirm {
+		border: 1px solid var(--rose);
+		border-radius: var(--radius-control);
+		padding: 14px 16px;
+	}
+
+	.delete-confirm p {
+		margin: 0 0 10px;
+		font-family: var(--font-sans);
+		font-size: 18px;
+		color: var(--ink);
+	}
+
+	.danger-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: var(--tap-target);
+		padding: 12px 22px;
+		background: var(--rose);
+		color: #fff;
+		border: 1px solid var(--rose);
+		border-radius: var(--radius-control);
+		font-family: var(--font-sans);
+		font-size: 16px;
+		font-weight: 600;
+		cursor: pointer;
 	}
 </style>
